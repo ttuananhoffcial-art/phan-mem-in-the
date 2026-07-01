@@ -3,4 +3,4 @@ pandas
 openpyxl
 pillow
 reportlab
-opencv-python-headless
+opencv-python-headless 
