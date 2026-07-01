@@ -1,0 +1,17 @@
+{
+    "admin": {
+        "password": "123456",
+        "expiry": null,
+        "role": "admin"
+    },
+    "Hoangchuong": {
+        "password": "123456",
+        "expiry": "2026-07-04 21:47:17",
+        "role": "user"
+    },
+    "Hoanghao": {
+        "password": "123456",
+        "expiry": "2026-07-06 21:47:35",
+        "role": "user"
+    }
+}
