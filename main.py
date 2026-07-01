@@ -10,7 +10,7 @@ import uuid
 import json 
 import re
 import datetime
-import unicodedata # Thư viện xử lý chữ Tiếng Việt
+import unicodedata 
 from collections import Counter
 from reportlab.lib.pagesizes import A4
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Image as RLImage
@@ -28,18 +28,16 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 st.set_page_config(page_title="Phần mềm Thẻ Taekwondo", page_icon="🥋", layout="wide")
 
 # =========================================================
-# CÔNG CỤ XỬ LÝ TEXT TỐI THƯỢNG (Chống lỗi font & khoảng trắng ảo)
+# CÔNG CỤ XỬ LÝ TEXT TỐI THƯỢNG
 # =========================================================
 def bo_dau_tieng_viet(text):
-    """Lột sạch dấu và khoảng trắng ảo để nhận diện chức vụ VIP xác suất 100%"""
     if pd.isna(text): return ""
-    s = re.sub(r'\s+', ' ', str(text).strip()) # Tiêu diệt khoảng trắng ảo
+    s = re.sub(r'\s+', ' ', str(text).strip()) 
     s = unicodedata.normalize('NFD', s)
     s = ''.join(c for c in s if not unicodedata.combining(c))
     return s.replace('Đ', 'D').replace('đ', 'd').upper()
     
 def chuan_hoa_chu(text):
-    """Chuẩn hóa font chữ in lên thẻ đẹp nhất"""
     if pd.isna(text): return ""
     text = re.sub(r'\s+', ' ', str(text).strip())
     return unicodedata.normalize('NFC', text.upper())
@@ -81,7 +79,7 @@ def load_config(default_cfg):
 def save_config(cfg):
     try:
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f: json.dump(cfg, f, ensure_ascii=False, indent=4)
-    except Exception as e: print(f"Lỗi lưu cấu hình: {e}")
+    except Exception as e: pass
 
 def extract_images_from_excel(file_buffer):
     img_dir = os.path.join(OUTPUT_DIR, "extracted_images")
@@ -127,24 +125,40 @@ def extract_images_from_excel(file_buffer):
                                                 out_path = os.path.join(img_dir, f"img_{uuid.uuid4().hex}.png")
                                                 with open(out_path, "wb") as f: f.write(archive.read(img_path_in_zip))
                                                 images_info.append({'row': row, 'col': col, 'rowOff': rowOff, 'path': out_path, 'rot': rot})
-                except Exception as ex: print("Lỗi parse:", ex)
-    except Exception as e: print(f"Lỗi đọc ảnh từ Excel: {e}")
+                except Exception: pass
+    except Exception: pass
     return images_info
 
+# =========================================================
+# FIX LỖI TẤT CẢ CÁC FONT TRÊN SERVER
+# =========================================================
 def lay_font_tieng_viet(font_name, size):
     size = int(size)
+    
+    # Bản đồ tên phông -> Tên file .ttf tải lên GitHub
     font_map = {
-        "Arial Bold": ["arialbd.ttf", "Arial.ttf", "arial.ttf"],
-        "Times New Roman Bold": ["timesbd.ttf", "times.ttf", "timesi.ttf"],
-        "Tahoma Bold": ["tahomabd.ttf", "tahoma.ttf", "Tahoma"],
-        "Calibri Bold": ["calibrib.ttf", "calibri.ttf", "Calibri"]
+        "Arial Bold": ["arialbd.ttf", "ARIALBD.TTF", "arialbd.TTF"],
+        "Times New Roman Bold": ["timesbd.ttf", "TIMESBD.TTF", "timesbd.TTF"],
+        "Tahoma Bold": ["tahomabd.ttf", "TAHOMABD.TTF", "tahomabd.TTF"],
+        "Calibri Bold": ["calibrib.ttf", "CALIBRIB.TTF", "calibrib.TTF"]
     }
+    
     files = font_map.get(font_name, ["arialbd.ttf"])
+
+    # 1. Tìm trực tiếp file bạn đã up lên GitHub
+    for f in files:
+        if os.path.exists(f):
+            try: return ImageFont.truetype(f, size)
+            except: pass
+
+    # 2. Dự phòng (nếu chạy trên máy cá nhân)
     for f in files:
         try: return ImageFont.truetype(f, size)
         except: pass
-    try: return ImageFont.truetype(font_name, size)
-    except: return ImageFont.load_default()
+
+    # 3. Kẹt quá dùng phông mặc định của máy chủ
+    try: return ImageFont.load_default()
+    except: return None
 
 def ve_chu_tu_dong_co_gian(draw, text, center_x, y, font_name, initial_size, fill, max_width):
     if not text: return
@@ -183,11 +197,9 @@ def xu_ly_text_in_the(text):
     return mapping.get(txt_upper, txt_upper)
 
 def tao_the_ca_nhan(data, img_info, chi_in_noi_dung, cfg, col_l1, col_l2, col_l3, col_l4, excel_row, idx_count, phoi_vdv, phoi_hlv):
-    # Dùng list comprehension để gộp tất cả các cột thành chuỗi vô cực (Đã xử lý khoảng trắng ảo)
     all_vals = [str(val) for val in data.tolist() if pd.notna(val)]
     all_text_clean = " ".join([bo_dau_tieng_viet(val) for val in all_vals])
     
-    # Keyword VIP tuyệt đối (Đã được viết không dấu)
     chuc_vu_vip = ["HLV", "HUAN LUYEN VIEN", "TRONG TAI", "BTC", "TRUONG DOAN", "BAN TO CHUC", "THU KY"]
     is_hlv = any(kw in all_text_clean for kw in chuc_vu_vip)
     
@@ -213,7 +225,7 @@ def tao_the_ca_nhan(data, img_info, chi_in_noi_dung, cfg, col_l1, col_l2, col_l3
             img_x, img_y = int(cfg['img_x']), int(cfg['img_y'])
             anh_vdv = ImageOps.fit(anh_vdv, (img_w, img_h), method=Image.Resampling.LANCZOS, centering=(0.5, 0.5))
             card.paste(anh_vdv, (img_x, img_y), anh_vdv)
-        except Exception as e: print(f"Lỗi vẽ ảnh: {e}")
+        except Exception: pass
 
     max_text_width = int(phoi_w * 0.55) 
     if col_l1 != "--- Không in ---" and pd.notna(data.get(col_l1)):
@@ -401,9 +413,6 @@ else:
             header_row = st.number_input("⚙️ Dòng chứa Tiêu đề cột:", min_value=1, value=4, step=1)
         
         if file_excel is not None:
-            # =================================================================
-            # HỆ THỐNG RAM SIÊU TỐC: ĐỌC DỮ LIỆU ĐÚNG 1 LẦN DUY NHẤT RỒI LƯU LẠI
-            # =================================================================
             file_bytes = file_excel.getvalue()
             file_id = f"{file_excel.name}_{file_excel.size}_{header_row}"
             
@@ -415,7 +424,6 @@ else:
                     st.session_state['raw_df'] = df_raw
                     st.session_state['ban_do_anh'] = extract_images_from_excel(io.BytesIO(file_bytes))
             
-            # Kéo dữ liệu đã lưu trong RAM ra dùng cực nhanh
             df_cols = st.session_state['raw_df'].copy()
             ban_do_anh = st.session_state['ban_do_anh'].copy()
             
