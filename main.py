@@ -26,6 +26,15 @@ USER_FILE = "users.json"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 st.set_page_config(page_title="Phần mềm Thẻ Taekwondo", page_icon="🥋", layout="wide")
+# --- XÓA LOGO VÀ MENU MẶC ĐỊNH CỦA STREAMLIT ---
+hide_st_style = """
+            <style>
+            #MainMenu {visibility: hidden;}
+            footer {visibility: hidden;}
+            header {visibility: hidden;}
+            </style>
+            """
+st.markdown(hide_st_style, unsafe_allow_html=True)
 
 # =========================================================
 # CÔNG CỤ XỬ LÝ TEXT TỐI THƯỢNG
