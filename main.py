@@ -250,7 +250,7 @@ def tao_the_ca_nhan(data, img_info, chi_in_noi_dung, cfg, col_l1, col_l2, col_l3
             card.paste(anh_vdv, (img_x, img_y), anh_vdv)
         except Exception: pass
 
-    max_text_width = int(phoi_w * 0.55) 
+    max_text_width = int(phoi_w * 0.95) 
     
     # KẾT HỢP DỮ LIỆU CÙNG VỚI TÙY CHỌN IN HOA
     if col_l1 != "--- Không in ---" and pd.notna(data.get(col_l1)):
