@@ -67,6 +67,10 @@ def save_users(users):
 
 def get_default_config(ref_w, ref_h):
     return {
+        'the_width_cm': 10.0, 'the_height_cm': 14.0,
+        'kieu_xuat_file': "🔲 4 thẻ / 1 trang A4",
+        'chi_in_noi_dung_rad': "🖼️ In đầy đủ (Cả nền Xanh/Hồng)",
+        'ten_file_pdf_xuat': "Danh_Sach_The",
         'font_name': 'Arial Bold',
         'img_x': int(ref_w * 0.08), 'img_y': int(ref_h * 0.62),
         'img_w': int(ref_w * 0.31), 'img_h': int(ref_h * 0.28),
@@ -432,7 +436,6 @@ else:
             t_width = col_w.number_input("Chiều ngang PDF (cm):", value=10.0, step=0.1)
             t_height = col_h.number_input("Chiều cao PDF (cm):", value=14.0, step=0.1)
             
-            # Ô NHẬP TÊN FILE MỚI CHO THẺ TẠM
             t_tenfile = st.text_input("🖨️ Tên file PDF khi tải về:", value=f"The_Tam_{t_ten.replace(' ', '')}" if t_ten else "The_Khach_Moi")
 
             btn_tao = st.button("⚡ TẠO & XEM TRƯỚC THẺ", type="primary", use_container_width=True)
@@ -467,7 +470,6 @@ else:
 
                     pdf_bytes = pdf_buffer.getvalue()
                     
-                    # NÚT DOWNLOAD ÁP DỤNG TÊN FILE TÙY CHỌN
                     st.download_button(label="🖨️ TẢI FILE PDF BẢN IN NÀY NGAY", data=pdf_bytes, file_name=f"{t_tenfile.strip()}.pdf", mime="application/pdf", use_container_width=True)
 
     # =========================================================================
@@ -481,19 +483,33 @@ else:
             try:
                 with Image.open(PHOI_VDV_PATH) as img_ref: ref_w, ref_h = img_ref.size
             except: pass
-
-        st.sidebar.markdown("### 📏 Kích thước & Khổ giấy in:")
-        the_width_cm = st.sidebar.number_input("Chiều ngang thẻ (cm):", value=10.0, step=0.1)
-        the_height_cm = st.sidebar.number_input("Chiều cao thẻ (cm):", value=14.0, step=0.1)
-        kieu_xuat_file = st.sidebar.radio("Chọn bố cục file PDF:", ["🔲 4 thẻ / 1 trang A4", "📄 1 thẻ / 1 trang"])
-        chi_in_noi_dung = (st.sidebar.radio("Tùy chọn nền phôi:", ["🖼️ In đầy đủ (Cả nền Xanh/Hồng)", "⬜ Chỉ in nội dung (Nền trắng)"]) == "⬜ Chỉ in nội dung (Nền trắng)")
-        
-        # Ô NHẬP TÊN FILE MỚI ĐƯỢC BỔ SUNG TRÊN SIDEBAR
-        st.sidebar.markdown("### 🖨️ Đặt tên file xuất ra:")
-        ten_file_pdf_xuat = st.sidebar.text_input("Tên file (không cần đuôi .pdf):", value="Danh_Sach_The")
-
+            
+        # NẠP CẤU HÌNH NGAY TỪ ĐẦU ĐỂ SIDEBAR CÓ THỂ ĐỌC ĐƯỢC
         default_cfg = get_default_config(ref_w, ref_h)
         cfg = load_config(default_cfg)
+
+        st.sidebar.markdown("### 📏 Kích thước & Khổ giấy in:")
+        the_width_cm = st.sidebar.number_input("Chiều ngang thẻ (cm):", value=float(cfg.get('the_width_cm', 10.0)), step=0.1)
+        the_height_cm = st.sidebar.number_input("Chiều cao thẻ (cm):", value=float(cfg.get('the_height_cm', 14.0)), step=0.1)
+        
+        kieu_xuat_list = ["🔲 4 thẻ / 1 trang A4", "📄 1 thẻ / 1 trang"]
+        kieu_idx = kieu_xuat_list.index(cfg.get('kieu_xuat_file', kieu_xuat_list[0])) if cfg.get('kieu_xuat_file') in kieu_xuat_list else 0
+        kieu_xuat_file = st.sidebar.radio("Chọn bố cục file PDF:", kieu_xuat_list, index=kieu_idx)
+        
+        nen_list = ["🖼️ In đầy đủ (Cả nền Xanh/Hồng)", "⬜ Chỉ in nội dung (Nền trắng)"]
+        nen_idx = nen_list.index(cfg.get('chi_in_noi_dung_rad', nen_list[0])) if cfg.get('chi_in_noi_dung_rad') in nen_list else 0
+        chi_in_noi_dung_rad = st.sidebar.radio("Tùy chọn nền phôi:", nen_list, index=nen_idx)
+        chi_in_noi_dung = (chi_in_noi_dung_rad == "⬜ Chỉ in nội dung (Nền trắng)")
+        
+        st.sidebar.markdown("### 🖨️ Đặt tên file xuất ra:")
+        ten_file_pdf_xuat = st.sidebar.text_input("Tên file (không cần đuôi .pdf):", value=cfg.get('ten_file_pdf_xuat', "Danh_Sach_The"))
+        
+        # Ghi nhận các giá trị Sidebar vào cấu hình
+        cfg['the_width_cm'] = the_width_cm
+        cfg['the_height_cm'] = the_height_cm
+        cfg['kieu_xuat_file'] = kieu_xuat_file
+        cfg['chi_in_noi_dung_rad'] = chi_in_noi_dung_rad
+        cfg['ten_file_pdf_xuat'] = ten_file_pdf_xuat
 
         st.markdown("### ⚙️ 3. Căn chỉnh Tọa độ, Cỡ chữ & Định dạng:")
         danh_sach_font = ["Arial Bold", "Times New Roman Bold", "Tahoma Bold", "Calibri Bold"]
@@ -563,6 +579,19 @@ else:
                 cfg['l4_size'] = col1.number_input("Cỡ chữ Dòng 4", value=int(cfg['l4_size']), step=5)
                 cfg['l4_x'] = col2.number_input("Tâm X Dòng 4", value=int(cfg['l4_x']), step=10)
                 cfg['l4_y'] = col3.number_input("Vị trí Y Dòng 4", value=int(cfg['l4_y']), step=10)
+
+            # NÚT BACKUP CẤU HÌNH VĨNH VIỄN
+            st.markdown("---")
+            st.info("💡 **MẸO LƯU VĨNH VIỄN:** Vì đây là máy chủ mây nên thông số sẽ bị xóa khi khởi động lại. Để lưu cố định, hãy tinh chỉnh thông số cho chuẩn, tải file dưới đây rồi up thẳng lên GitHub của bạn!")
+            
+            json_cfg = json.dumps(cfg, ensure_ascii=False, indent=4)
+            st.download_button(
+                label="📥 TẢI XUỐNG FILE config_the.json",
+                data=json_cfg,
+                file_name="config_the.json",
+                mime="application/json",
+                use_container_width=True
+            )
 
         save_config(cfg)
 
@@ -717,7 +746,6 @@ else:
                                 table.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'CENTER'), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')]))
                                 story.append(table)
                                 doc.build(story)
-                                # ÁP DỤNG TÊN FILE MỚI CHO BẢN A4
                                 ten_file = f"{ten_file_pdf_xuat.strip()}.pdf" if ten_file_pdf_xuat else "In_The_Grid_A4.pdf"
                             else:
                                 st.info(f"💡 Kích thước xuất PDF: {the_width_cm}cm x {the_height_cm}cm mỗi trang.")
@@ -725,7 +753,6 @@ else:
                                 c = canvas.Canvas(pdf_buffer, pagesize=(the_width_cm*cm, the_height_cm*cm))
                                 for path_the in danh_sach_duong_dan_the: c.drawImage(path_the, 0, 0, width=the_width_cm*cm, height=the_height_cm*cm); c.showPage()
                                 c.save()
-                                # ÁP DỤNG TÊN FILE MỚI CHO BẢN IN LẺ
                                 ten_file = f"{ten_file_pdf_xuat.strip()}.pdf" if ten_file_pdf_xuat else f"In_The_Don_{the_width_cm}x{the_height_cm}.pdf"
                         
                         pdf_bytes = pdf_buffer.getvalue()
