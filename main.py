@@ -21,11 +21,13 @@ from reportlab.pdfgen import canvas
 OUTPUT_DIR = "the_tam_thoi"
 PHOI_VDV_PATH = "phoi_vdv.png"
 PHOI_HLV_PATH = "phoi_hlv.png"
+PHOI_TAM_PATH = "phoi_tam.png"
 CONFIG_FILE = "config_the.json" 
 USER_FILE = "users.json"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 st.set_page_config(page_title="Phần mềm Thẻ Taekwondo", page_icon="🥋", layout="wide")
+
 # --- XÓA LOGO VÀ MENU MẶC ĐỊNH CỦA STREAMLIT ---
 hide_st_style = """
             <style>
@@ -138,34 +140,22 @@ def extract_images_from_excel(file_buffer):
     except Exception: pass
     return images_info
 
-# =========================================================
-# FIX LỖI TẤT CẢ CÁC FONT TRÊN SERVER
-# =========================================================
 def lay_font_tieng_viet(font_name, size):
     size = int(size)
-    
-    # Bản đồ tên phông -> Tên file .ttf tải lên GitHub
     font_map = {
         "Arial Bold": ["arialbd.ttf", "ARIALBD.TTF", "arialbd.TTF"],
         "Times New Roman Bold": ["timesbd.ttf", "TIMESBD.TTF", "timesbd.TTF"],
         "Tahoma Bold": ["tahomabd.ttf", "TAHOMABD.TTF", "tahomabd.TTF"],
         "Calibri Bold": ["calibrib.ttf", "CALIBRIB.TTF", "calibrib.TTF"]
     }
-    
     files = font_map.get(font_name, ["arialbd.ttf"])
-
-    # 1. Tìm trực tiếp file bạn đã up lên GitHub
     for f in files:
         if os.path.exists(f):
             try: return ImageFont.truetype(f, size)
             except: pass
-
-    # 2. Dự phòng (nếu chạy trên máy cá nhân)
     for f in files:
         try: return ImageFont.truetype(f, size)
         except: pass
-
-    # 3. Kẹt quá dùng phông mặc định của máy chủ
     try: return ImageFont.load_default()
     except: return None
 
@@ -205,16 +195,28 @@ def xu_ly_text_in_the(text):
     }
     return mapping.get(txt_upper, txt_upper)
 
-def tao_the_ca_nhan(data, img_info, chi_in_noi_dung, cfg, col_l1, col_l2, col_l3, col_l4, excel_row, idx_count, phoi_vdv, phoi_hlv):
+def tao_the_ca_nhan(data, img_info, chi_in_noi_dung, cfg, col_l1, col_l2, col_l3, col_l4, excel_row, idx_count, phoi_vdv, phoi_hlv, phoi_tam):
     all_vals = [str(val) for val in data.tolist() if pd.notna(val)]
     all_text_clean = " ".join([bo_dau_tieng_viet(val) for val in all_vals])
     
     chuc_vu_vip = ["HLV", "HUAN LUYEN VIEN", "TRONG TAI", "BTC", "TRUONG DOAN", "BAN TO CHUC", "THU KY"]
-    is_hlv = any(kw in all_text_clean for kw in chuc_vu_vip)
+    chuc_vu_tam = ["TAM THOI", "KHACH MOI", "BAO CHI", "TINH NGUYEN", "VIP", "DAI BIEU", "TNV"]
     
-    phoi_chon = phoi_hlv if is_hlv else phoi_vdv
-    phoi_goc = Image.open(phoi_chon).convert("RGBA")
-    phoi_w, phoi_h = phoi_goc.size
+    is_hlv = any(kw in all_text_clean for kw in chuc_vu_vip)
+    is_tam = any(kw in all_text_clean for kw in chuc_vu_tam)
+    
+    if is_tam and os.path.exists(phoi_tam): phoi_chon = phoi_tam
+    elif is_hlv and os.path.exists(phoi_hlv): phoi_chon = phoi_hlv
+    elif os.path.exists(phoi_vdv): phoi_chon = phoi_vdv
+    else: phoi_chon = None
+        
+    if phoi_chon:
+        phoi_goc = Image.open(phoi_chon).convert("RGBA")
+        phoi_w, phoi_h = phoi_goc.size
+    else:
+        phoi_w, phoi_h = 1000, 1400
+        phoi_goc = Image.new("RGBA", (phoi_w, phoi_h), (255, 255, 255, 255))
+        
     card = Image.new("RGBA", (phoi_w, phoi_h), (255, 255, 255, 255)) if chi_in_noi_dung else phoi_goc
     draw = ImageDraw.Draw(card)
     
@@ -283,7 +285,7 @@ if not st.session_state.get('logged_in', False):
 else:
     st.sidebar.markdown(f"👤 Xin chào: **{st.session_state['username'].upper()}**")
     
-    menu_options = ["🏠 Trang chủ", "➕ Tạo thẻ thi đấu"]
+    menu_options = ["🏠 Trang chủ", "➕ Tạo thẻ thi đấu", "⏳ In nhanh Thẻ Tạm"]
     if st.session_state.get('role') == "admin":
         menu_options.append("🔑 Quản lý hệ thống")
         
@@ -297,9 +299,11 @@ else:
         st.info("Chào mừng bạn quay trở lại phần mềm quản lý thẻ.")
 
     elif menu_selection == "🔑 Quản lý hệ thống" and st.session_state.get('role') == "admin":
-        st.title("🔑 TRUNG TÂM QUẢN LÝ TÀI KHOẢN & BẢO MẬT")
+        st.title("🔑 TRUNG TÂM QUẢN LÝ HỆ THỐNG")
         all_users = load_users()
-        tab_admin, tab_sub_users = st.tabs(["🔒 Đổi mật khẩu Admin", "👥 Cấp tài khoản người dùng"])
+        
+        # BỔ SUNG TAB QUẢN LÝ PHÔI THẺ TRỰC TIẾP
+        tab_admin, tab_sub_users, tab_phoi = st.tabs(["🔒 Đổi mật khẩu Admin", "👥 Cấp tài khoản người dùng", "🖼️ Quản lý Phôi Thẻ"])
         
         with tab_admin:
             st.subheader("Thay đổi mật khẩu Admin")
@@ -351,6 +355,104 @@ else:
                         st.rerun()
             else: st.info("Chưa có tài khoản phụ nào được cấp.")
 
+        # GIAO DIỆN QUẢN LÝ PHÔI THẺ TRỰC TIẾP
+        with tab_phoi:
+            st.subheader("🖼️ Quản lý & Cập nhật Phôi Thẻ trực tiếp")
+            st.info("💡 Không cần dùng GitHub! Bạn có thể tải lên file phôi ảnh (PNG/JPG) mới cho giải đấu ngay tại đây. Cập nhật xong có thể vào mục Tạo Thẻ in ngay lập tức.")
+            
+            col_p1, col_p2, col_p3 = st.columns(3)
+            
+            # Khối Vận Động Viên
+            with col_p1:
+                st.markdown("#### 1. Phôi Vận Động Viên")
+                if os.path.exists(PHOI_VDV_PATH): st.image(PHOI_VDV_PATH, use_container_width=True)
+                else: st.warning("Chưa có phôi VĐV")
+                up_vdv = st.file_uploader("📂 Tải lên phôi VĐV thay thế", type=['png', 'jpg', 'jpeg'], key="up_vdv")
+                if up_vdv:
+                    with open(PHOI_VDV_PATH, "wb") as f: f.write(up_vdv.getbuffer())
+                    st.success("✅ Đã cập nhật phôi VĐV thành công!")
+                    st.rerun()
+
+            # Khối Ban Huấn Luyện
+            with col_p2:
+                st.markdown("#### 2. Phôi Ban Huấn Luyện")
+                if os.path.exists(PHOI_HLV_PATH): st.image(PHOI_HLV_PATH, use_container_width=True)
+                else: st.warning("Chưa có phôi HLV")
+                up_hlv = st.file_uploader("📂 Tải lên phôi HLV thay thế", type=['png', 'jpg', 'jpeg'], key="up_hlv")
+                if up_hlv:
+                    with open(PHOI_HLV_PATH, "wb") as f: f.write(up_hlv.getbuffer())
+                    st.success("✅ Đã cập nhật phôi HLV thành công!")
+                    st.rerun()
+
+            # Khối Thẻ Tạm Thời
+            with col_p3:
+                st.markdown("#### 3. Phôi Thẻ Tạm / Khách Mời")
+                if os.path.exists(PHOI_TAM_PATH): st.image(PHOI_TAM_PATH, use_container_width=True)
+                else: st.warning("Chưa có phôi Thẻ Tạm")
+                up_tam = st.file_uploader("📂 Tải lên phôi Tạm thay thế", type=['png', 'jpg', 'jpeg'], key="up_tam")
+                if up_tam:
+                    with open(PHOI_TAM_PATH, "wb") as f: f.write(up_tam.getbuffer())
+                    st.success("✅ Đã cập nhật phôi Thẻ Tạm thành công!")
+                    st.rerun()
+
+    # =========================================================================
+    # MODULE: IN NHANH THẺ TẠM THỜI (KHÔNG CẦN EXCEL)
+    # =========================================================================
+    elif menu_selection == "⏳ In nhanh Thẻ Tạm":
+        st.title("⏳ IN NHANH THẺ TẠM THỜI & KHÁCH MỜI")
+        st.info("💡 Nhập trực tiếp tên Khách mời, Đại biểu hoặc Trọng tài đột xuất để in thẻ ngay tại giải đấu mà không cần file Excel.")
+
+        col1, col2 = st.columns([1, 1.5])
+        
+        with col1:
+            st.markdown("### 📝 1. Nhập thông tin")
+            t_ten = st.text_input("Họ và Tên (Dòng 1):", placeholder="Ví dụ: NGUYỄN VĂN A").strip()
+            t_chucvu = st.text_input("Chức vụ (Dòng 2):", placeholder="Ví dụ: KHÁCH MỜI").strip()
+            t_donvi = st.text_input("Đơn vị/Ghi chú (Dòng 4):", placeholder="Ví dụ: BAN TỔ CHỨC").strip()
+
+            st.markdown("### ⚙️ 2. Cài đặt bản in")
+            chi_in_noi_dung_tam = (st.radio("Tùy chọn nền phôi:", ["🖼️ In đầy đủ (Cả nền phôi)", "⬜ Chỉ in nội dung (Nền trắng)"], key="rad_tam") == "⬜ Chỉ in nội dung (Nền trắng)")
+            
+            col_w, col_h = st.columns(2)
+            t_width = col_w.number_input("Chiều ngang PDF (cm):", value=10.0, step=0.1)
+            t_height = col_h.number_input("Chiều cao PDF (cm):", value=14.0, step=0.1)
+
+            btn_tao = st.button("⚡ TẠO & XEM TRƯỚC THẺ", type="primary", use_container_width=True)
+
+        with col2:
+            st.markdown("### 👁️ 3. Xem trước & Tải file")
+            if not os.path.exists(PHOI_TAM_PATH):
+                st.warning("⚠️ Hệ thống chưa có Phôi Thẻ Tạm. Vui lòng vào mục 'Quản lý hệ thống' -> 'Quản lý Phôi Thẻ' để tải ảnh phôi lên!")
+            else:
+                if btn_tao:
+                    ref_w, ref_h = 1000, 1400
+                    try:
+                        with Image.open(PHOI_TAM_PATH) as img_ref: ref_w, ref_h = img_ref.size
+                    except: pass
+                    cfg = load_config(get_default_config(ref_w, ref_h))
+
+                    mock_data = pd.Series({"Tên": t_ten if t_ten else None, "Chức vụ": t_chucvu if t_chucvu else None, "Đơn vị": t_donvi if t_donvi else None, "Trống": None})
+
+                    path_tam = tao_the_ca_nhan(
+                        data=mock_data, img_info=None, chi_in_noi_dung=chi_in_noi_dung_tam, cfg=cfg,
+                        col_l1="Tên", col_l2="Chức vụ", col_l3="Trống", col_l4="Đơn vị", excel_row=999, idx_count="nhanh",
+                        phoi_vdv=PHOI_TAM_PATH, phoi_hlv=PHOI_TAM_PATH, phoi_tam=PHOI_TAM_PATH
+                    )
+
+                    st.image(path_tam, width=380, caption="Bản xem trước thẻ")
+
+                    pdf_buffer = io.BytesIO()
+                    c = canvas.Canvas(pdf_buffer, pagesize=(t_width*cm, t_height*cm))
+                    c.drawImage(path_tam, 0, 0, width=t_width*cm, height=t_height*cm)
+                    c.showPage()
+                    c.save()
+
+                    pdf_bytes = pdf_buffer.getvalue()
+                    st.download_button(label="🖨️ TẢI FILE PDF BẢN IN NÀY NGAY", data=pdf_bytes, file_name=f"The_Tam_{t_ten if t_ten else 'TruongDoan'}.pdf", mime="application/pdf", use_container_width=True)
+
+    # =========================================================================
+    # MODULE: TẠO THẺ THI ĐẤU TỪ EXCEL
+    # =========================================================================
     elif menu_selection == "➕ Tạo thẻ thi đấu":
         st.title("➕ TẠO THẺ THI ĐẤU & DÀN TRANG IN")
         
@@ -439,13 +541,11 @@ else:
             clean_cols = []
             for i, c in enumerate(df_cols.columns):
                 c_str = str(c).strip()
-                if "Unnamed" in c_str or c_str.lower() == "nan":
-                    clean_cols.append(f"Cột {i+1} (Bị trống tiêu đề)")
-                else:
-                    clean_cols.append(c_str)
+                if "Unnamed" in c_str or c_str.lower() == "nan": clean_cols.append(f"Cột {i+1} (Bị trống tiêu đề)")
+                else: clean_cols.append(c_str)
             df_cols.columns = clean_cols
             
-            st.markdown("👁️ **Màn hình X-Quang: Đây là những cột máy tính đọc được (Hãy tìm cột Năm sinh của bạn ở đây):**")
+            st.markdown("👁️ **Màn hình X-Quang: Đây là những cột máy tính đọc được:**")
             st.dataframe(df_cols.head(2), use_container_width=True)
 
             cols_list = ["--- Không in ---"] + list(df_cols.columns)
@@ -522,8 +622,8 @@ else:
 
             st.markdown("---")
             if st.button("⚡ BẮT ĐẦU TẠO ẢNH THẺ COMPLETE", type="primary", use_container_width=True):
-                if not os.path.exists(PHOI_VDV_PATH) or not os.path.exists(PHOI_HLV_PATH):
-                    st.error("❌ Thiếu file phoi_vdv.png hoặc phoi_hlv.png trong thư mục phần mềm.")
+                if not os.path.exists(PHOI_VDV_PATH) and not os.path.exists(PHOI_HLV_PATH):
+                    st.error("❌ Thiếu phôi thẻ! Bạn hãy vào mục 'Quản lý hệ thống' -> 'Quản lý Phôi Thẻ' để tải file phôi lên nhé.")
                 else:
                     danh_sach_duong_dan_the = []
                     progress_bar = st.progress(0)
@@ -534,7 +634,7 @@ else:
                         ten_hien_tai = str(p['row_data'].get(col_id, ""))
                         status_text.text(f"⏳ Đang vẽ và kết xuất thẻ {idx_loop + 1}/{total_rows}: {ten_hien_tai}...")
                         progress_bar.progress((idx_loop + 1) / total_rows)
-                        path_tam = tao_the_ca_nhan(p['row_data'], p['img_info'], chi_in_noi_dung, cfg, col_l1, col_l2, col_l3, col_l4, p['excel_row'], idx_loop, PHOI_VDV_PATH, PHOI_HLV_PATH)
+                        path_tam = tao_the_ca_nhan(p['row_data'], p['img_info'], chi_in_noi_dung, cfg, col_l1, col_l2, col_l3, col_l4, p['excel_row'], idx_loop, PHOI_VDV_PATH, PHOI_HLV_PATH, PHOI_TAM_PATH)
                         danh_sach_duong_dan_the.append(path_tam)
                     
                     status_text.text("✅ Đang dàn trang xuất file PDF...")
