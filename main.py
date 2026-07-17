@@ -70,6 +70,7 @@ def get_default_config(ref_w, ref_h):
         'the_width_cm': 10.0, 'the_height_cm': 14.0,
         'kieu_xuat_file': "🔲 4 thẻ / 1 trang A4",
         'chi_in_noi_dung_rad': "🖼️ In đầy đủ (Cả nền Xanh/Hồng)",
+        'ten_file_pdf_xuat': "Danh_Sach_The",
         'font_name': 'Arial Bold',
         'img_x': int(ref_w * 0.08), 'img_y': int(ref_h * 0.62),
         'img_w': int(ref_w * 0.31), 'img_h': int(ref_h * 0.28),
@@ -483,6 +484,7 @@ else:
                 with Image.open(PHOI_VDV_PATH) as img_ref: ref_w, ref_h = img_ref.size
             except: pass
             
+        # NẠP CẤU HÌNH NGAY TỪ ĐẦU ĐỂ SIDEBAR CÓ THỂ ĐỌC ĐƯỢC
         default_cfg = get_default_config(ref_w, ref_h)
         cfg = load_config(default_cfg)
 
@@ -499,15 +501,15 @@ else:
         chi_in_noi_dung_rad = st.sidebar.radio("Tùy chọn nền phôi:", nen_list, index=nen_idx)
         chi_in_noi_dung = (chi_in_noi_dung_rad == "⬜ Chỉ in nội dung (Nền trắng)")
         
-        # Ô NHẬP TÊN FILE - ĐỂ TRỐNG SẼ TỰ ĐỘNG NHẬN DIỆN
         st.sidebar.markdown("### 🖨️ Đặt tên file xuất ra:")
-        ten_file_pdf_xuat = st.sidebar.text_input("Tên file (không cần đuôi .pdf):", value="", placeholder="Để trống để phần mềm tự lấy tên Đơn Vị")
+        ten_file_pdf_xuat = st.sidebar.text_input("Tên file (không cần đuôi .pdf):", value=cfg.get('ten_file_pdf_xuat', "Danh_Sach_The"))
         
         # Ghi nhận các giá trị Sidebar vào cấu hình
         cfg['the_width_cm'] = the_width_cm
         cfg['the_height_cm'] = the_height_cm
         cfg['kieu_xuat_file'] = kieu_xuat_file
         cfg['chi_in_noi_dung_rad'] = chi_in_noi_dung_rad
+        cfg['ten_file_pdf_xuat'] = ten_file_pdf_xuat
 
         st.markdown("### ⚙️ 3. Căn chỉnh Tọa độ, Cỡ chữ & Định dạng:")
         danh_sach_font = ["Arial Bold", "Times New Roman Bold", "Tahoma Bold", "Calibri Bold"]
@@ -578,6 +580,7 @@ else:
                 cfg['l4_x'] = col2.number_input("Tâm X Dòng 4", value=int(cfg['l4_x']), step=10)
                 cfg['l4_y'] = col3.number_input("Vị trí Y Dòng 4", value=int(cfg['l4_y']), step=10)
 
+            # NÚT BACKUP CẤU HÌNH VĨNH VIỄN
             st.markdown("---")
             st.info("💡 **MẸO LƯU VĨNH VIỄN:** Vì đây là máy chủ mây nên thông số sẽ bị xóa khi khởi động lại. Để lưu cố định, hãy tinh chỉnh thông số cho chuẩn, tải file dưới đây rồi up thẳng lên GitHub của bạn!")
             
@@ -718,25 +721,6 @@ else:
                     if len(danh_sach_duong_dan_the) > 0:
                         st.markdown("---")
                         st.markdown("<h2 style='text-align: center; color: #1B368E;'>🖨️ FILE ĐÃ SẴN SÀNG ĐỂ IN</h2>", unsafe_allow_html=True)
-                        
-                        # --- THUẬT TOÁN ĐẶT TÊN FILE TỰ ĐỘNG THÔNG MINH ---
-                        final_filename = ten_file_pdf_xuat.strip()
-                        if not final_filename:
-                            if col_l4 != "--- Không in ---":
-                                # Lấy ra danh sách các Đơn vị xuất hiện trong file Excel
-                                ds_don_vi = [str(p['row_data'].get(col_l4, "")) for p in persons if pd.notna(p['row_data'].get(col_l4)) and str(p['row_data'].get(col_l4, "")).strip() != ""]
-                                if ds_don_vi:
-                                    # Tìm đơn vị nào xuất hiện nhiều nhất (mode)
-                                    don_vi_pho_bien = Counter(ds_don_vi).most_common(1)[0][0]
-                                    # Xóa ký tự cấm của file hệ thống
-                                    don_vi_pho_bien = re.sub(r'[\\/*?:"<>|]', "", don_vi_pho_bien).strip()
-                                    final_filename = f"Danh_Sach_{don_vi_pho_bien}"
-                                    
-                            if not final_filename:
-                                final_filename = "Danh_Sach_The"
-                                
-                        ten_file_pdf_hoan_chinh = f"{final_filename}.pdf"
-
                         pdf_buffer = io.BytesIO()
                         col_space1, col_center, col_space3 = st.columns([1, 2, 1])
                         with col_center:
@@ -762,15 +746,16 @@ else:
                                 table.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'CENTER'), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')]))
                                 story.append(table)
                                 doc.build(story)
+                                ten_file = f"{ten_file_pdf_xuat.strip()}.pdf" if ten_file_pdf_xuat else "In_The_Grid_A4.pdf"
                             else:
                                 st.info(f"💡 Kích thước xuất PDF: {the_width_cm}cm x {the_height_cm}cm mỗi trang.")
                                 for i, p in enumerate(danh_sach_duong_dan_the): st.image(p, caption=f"Thẻ số {i+1}", use_container_width=True)
                                 c = canvas.Canvas(pdf_buffer, pagesize=(the_width_cm*cm, the_height_cm*cm))
                                 for path_the in danh_sach_duong_dan_the: c.drawImage(path_the, 0, 0, width=the_width_cm*cm, height=the_height_cm*cm); c.showPage()
                                 c.save()
+                                ten_file = f"{ten_file_pdf_xuat.strip()}.pdf" if ten_file_pdf_xuat else f"In_The_Don_{the_width_cm}x{the_height_cm}.pdf"
                         
                         pdf_bytes = pdf_buffer.getvalue()
                         status_text.empty(); progress_bar.empty()
-                        
-                        st.download_button("🔥 BẤM ĐỂ TẢI FILE PDF IN NGAY 🔥", data=pdf_bytes, file_name=ten_file_pdf_hoan_chinh, mime="application/pdf", use_container_width=True)
+                        st.download_button("🔥 BẤM ĐỂ TẢI FILE PDF IN NGAY 🔥", data=pdf_bytes, file_name=ten_file, mime="application/pdf", use_container_width=True)
                         st.balloons()
