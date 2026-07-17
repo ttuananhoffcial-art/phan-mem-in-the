@@ -179,7 +179,6 @@ def ve_chu_tu_dong_co_gian(draw, text, center_x, y, font_name, initial_size, fil
     except Exception as e:
         draw.text((center_x, y), text, fill=fill, font=font)
 
-# ĐỘNG CƠ XỬ LÝ CHỮ NÂNG CẤP (FULL 4 TÙY CHỌN VIẾT HOA)
 def xu_ly_text_in_the(text, case_type="Viết hoa toàn bộ"):
     if pd.isna(text): return ""
     text = str(text).strip()
@@ -191,7 +190,6 @@ def xu_ly_text_in_the(text, case_type="Viết hoa toàn bộ"):
     
     txt_lower = text.lower()
     
-    # Bản dịch tiêu chuẩn (Luôn ở dạng: Huấn Luyện Viên)
     mapping = {
         "hlv": "Huấn Luyện Viên", 
         "vdv": "Vận Động Viên", 
@@ -203,24 +201,17 @@ def xu_ly_text_in_the(text, case_type="Viết hoa toàn bộ"):
         "trọng tài": "Trọng Tài"
     }
     
-    # NẾU NGƯỜI DÙNG CHỌN KIỂU GÌ THÌ XỬ LÝ THEO KIỂU ĐÓ
     if case_type == "Viết hoa toàn bộ":
         if txt_lower in mapping: return mapping[txt_lower].upper()
         return text.upper()
-        
     elif case_type == "Viết hoa chữ cái đầu mỗi chữ":
-        # VD: Huấn Luyện Viên, Vận Động Viên
         if txt_lower in mapping: return mapping[txt_lower]
         return text.title().replace("Hlv", "HLV").replace("Vđv", "VĐV").replace("Btc", "BTC")
-        
     elif case_type == "Chỉ viết hoa chữ đầu của câu":
-        # VD: Huấn luyện viên, Vận động viên
         if txt_lower in mapping: return mapping[txt_lower].capitalize().replace("Hlv", "HLV")
         return text.capitalize().replace("Hlv", "HLV").replace("Vđv", "VĐV").replace("Btc", "BTC")
-        
     else: 
-        # Giữ nguyên gốc: Người dùng gõ gì trong Excel in ra nguyên xi như thế
-        if txt_lower in mapping: return mapping[txt_lower] # Vẫn dịch từ viết tắt
+        if txt_lower in mapping: return mapping[txt_lower] 
         return text 
 
 def tao_the_ca_nhan(data, img_info, chi_in_noi_dung, cfg, col_l1, col_l2, col_l3, col_l4, excel_row, idx_count, phoi_vdv, phoi_hlv, phoi_tam):
@@ -266,10 +257,8 @@ def tao_the_ca_nhan(data, img_info, chi_in_noi_dung, cfg, col_l1, col_l2, col_l3
             card.paste(anh_vdv, (img_x, img_y), anh_vdv)
         except Exception: pass
 
-    # MỞ RỘNG VÙNG AN TOÀN CHỮ LÊN 90% (Để chữ không bị bóp nhỏ quá sớm)
     max_text_width = int(phoi_w * 0.90) 
     
-    # KẾT HỢP DỮ LIỆU CÙNG VỚI TÙY CHỌN IN HOA
     if col_l1 != "--- Không in ---" and pd.notna(data.get(col_l1)):
         txt = xu_ly_text_in_the(data.get(col_l1), cfg.get('l1_case', "Viết hoa toàn bộ"))
         ve_chu_tu_dong_co_gian(draw, txt, cfg['l1_x'], cfg['l1_y'], cfg['font_name'], cfg['l1_size'], cfg['l1_color'], max_text_width)
@@ -442,6 +431,9 @@ else:
             col_w, col_h = st.columns(2)
             t_width = col_w.number_input("Chiều ngang PDF (cm):", value=10.0, step=0.1)
             t_height = col_h.number_input("Chiều cao PDF (cm):", value=14.0, step=0.1)
+            
+            # Ô NHẬP TÊN FILE MỚI CHO THẺ TẠM
+            t_tenfile = st.text_input("🖨️ Tên file PDF khi tải về:", value=f"The_Tam_{t_ten.replace(' ', '')}" if t_ten else "The_Khach_Moi")
 
             btn_tao = st.button("⚡ TẠO & XEM TRƯỚC THẺ", type="primary", use_container_width=True)
 
@@ -474,7 +466,9 @@ else:
                     c.save()
 
                     pdf_bytes = pdf_buffer.getvalue()
-                    st.download_button(label="🖨️ TẢI FILE PDF BẢN IN NÀY NGAY", data=pdf_bytes, file_name=f"The_Tam_{t_ten if t_ten else 'TruongDoan'}.pdf", mime="application/pdf", use_container_width=True)
+                    
+                    # NÚT DOWNLOAD ÁP DỤNG TÊN FILE TÙY CHỌN
+                    st.download_button(label="🖨️ TẢI FILE PDF BẢN IN NÀY NGAY", data=pdf_bytes, file_name=f"{t_tenfile.strip()}.pdf", mime="application/pdf", use_container_width=True)
 
     # =========================================================================
     # MODULE: TẠO THẺ THI ĐẤU TỪ EXCEL
@@ -493,6 +487,10 @@ else:
         the_height_cm = st.sidebar.number_input("Chiều cao thẻ (cm):", value=14.0, step=0.1)
         kieu_xuat_file = st.sidebar.radio("Chọn bố cục file PDF:", ["🔲 4 thẻ / 1 trang A4", "📄 1 thẻ / 1 trang"])
         chi_in_noi_dung = (st.sidebar.radio("Tùy chọn nền phôi:", ["🖼️ In đầy đủ (Cả nền Xanh/Hồng)", "⬜ Chỉ in nội dung (Nền trắng)"]) == "⬜ Chỉ in nội dung (Nền trắng)")
+        
+        # Ô NHẬP TÊN FILE MỚI ĐƯỢC BỔ SUNG TRÊN SIDEBAR
+        st.sidebar.markdown("### 🖨️ Đặt tên file xuất ra:")
+        ten_file_pdf_xuat = st.sidebar.text_input("Tên file (không cần đuôi .pdf):", value="Danh_Sach_The")
 
         default_cfg = get_default_config(ref_w, ref_h)
         cfg = load_config(default_cfg)
@@ -502,7 +500,6 @@ else:
         font_hien_tai = cfg.get('font_name', "Arial Bold")
         cfg['font_name'] = st.selectbox("🔤 Chọn kiểu phông chữ:", danh_sach_font, index=danh_sach_font.index(font_hien_tai) if font_hien_tai in danh_sach_font else 0)
 
-        # GIAO DIỆN TÙY CHỈNH CHỮ ĐƯỢC NÂNG CẤP FULL 4 TÍCH CHỌN IN HOA
         with st.expander("🛠️ Bấm vào đây để KÉO ẢNH & ĐỔI MÀU/KIỂU CHỮ (Tự động lưu)", expanded=False):
             tab_img, tab_txt1, tab_txt2 = st.tabs(["📸 Ảnh chân dung", "🔤 Dòng 1 & Dòng 2", "🔤 Dòng 3 & Dòng 4"])
             
@@ -513,7 +510,6 @@ else:
                 cfg['img_w'] = col1.number_input("Chiều rộng ảnh", value=int(cfg['img_w']), step=10)
                 cfg['img_h'] = col2.number_input("Chiều cao ảnh", value=int(cfg['img_h']), step=10)
             
-            # DANH SÁCH 4 TÙY CHỌN MỚI
             danh_sach_kieu_chu = ["Viết hoa toàn bộ", "Giữ nguyên gốc", "Viết hoa chữ cái đầu mỗi chữ", "Chỉ viết hoa chữ đầu của câu"]
             
             with tab_txt1:
@@ -721,14 +717,16 @@ else:
                                 table.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'CENTER'), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')]))
                                 story.append(table)
                                 doc.build(story)
-                                ten_file = "In_The_Grid_A4.pdf"
+                                # ÁP DỤNG TÊN FILE MỚI CHO BẢN A4
+                                ten_file = f"{ten_file_pdf_xuat.strip()}.pdf" if ten_file_pdf_xuat else "In_The_Grid_A4.pdf"
                             else:
                                 st.info(f"💡 Kích thước xuất PDF: {the_width_cm}cm x {the_height_cm}cm mỗi trang.")
                                 for i, p in enumerate(danh_sach_duong_dan_the): st.image(p, caption=f"Thẻ số {i+1}", use_container_width=True)
                                 c = canvas.Canvas(pdf_buffer, pagesize=(the_width_cm*cm, the_height_cm*cm))
                                 for path_the in danh_sach_duong_dan_the: c.drawImage(path_the, 0, 0, width=the_width_cm*cm, height=the_height_cm*cm); c.showPage()
                                 c.save()
-                                ten_file = f"In_The_Don_{the_width_cm}x{the_height_cm}.pdf"
+                                # ÁP DỤNG TÊN FILE MỚI CHO BẢN IN LẺ
+                                ten_file = f"{ten_file_pdf_xuat.strip()}.pdf" if ten_file_pdf_xuat else f"In_The_Don_{the_width_cm}x{the_height_cm}.pdf"
                         
                         pdf_bytes = pdf_buffer.getvalue()
                         status_text.empty(); progress_bar.empty()
