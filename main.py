@@ -179,18 +179,39 @@ def ve_chu_tu_dong_co_gian(draw, text, center_x, y, font_name, initial_size, fil
     except Exception as e:
         draw.text((center_x, y), text, fill=fill, font=font)
 
-# ĐỘNG CƠ XỬ LÝ CHỮ NÂNG CẤP (HỖ TRỢ TÙY CHỌN VIẾT HOA)
+# ĐỘNG CƠ XỬ LÝ CHỮ NÂNG CẤP (TÔN TRỌNG TUYỆT ĐỐI TÙY CHỌN NGƯỜI DÙNG)
 def xu_ly_text_in_the(text, case_type="Viết hoa toàn bộ"):
     if pd.isna(text): return ""
     text = str(text).strip()
     if text.upper() == "NAN" or text == "": return ""
     
+    # Xử lý cắt chuỗi nếu là dạng thời gian (Năm sinh)
     if "00:00:00" in text or re.match(r"^\d{4}-\d{2}-\d{2}", text): return text.split("-")[0]
     if re.match(r"^\d{1,2}/\d{1,2}/\d{4}", text): return text.split("/")[-1]
     if text.endswith(".0"): text = text[:-2]
     
+    # Giữ nguyên văn bản thô chưa qua chỉnh sửa case
     txt_goc = chuan_hoa_chu(text)
     txt_upper = txt_goc.upper()
+    
+    # Tự động dịch từ viết tắt
+    mapping = {
+        "HLV": "HUẤN LUYỆN VIÊN", "VĐV": "VẬN ĐỘNG VIÊN", "VDV": "VẬN ĐỘNG VIÊN", "BTC": "BAN TỔ CHỨC",
+        "TRƯỞNG ĐOÀN": "TRƯỞNG ĐOÀN", "HLV TRƯỞNG": "HLV TRƯỞNG", "THƯ KÝ": "THƯ KÝ", "TRỌNG TÀI": "TRỌNG TÀI"
+    }
+    
+    # Nếu chữ gốc khớp với từ viết tắt thì lấy bản dịch, nếu không thì lấy đúng chữ người dùng gõ
+    mapped_text = mapping.get(txt_upper, txt_goc)
+    
+    # ÉP KIỂU CHỮ THEO ĐÚNG NÚT TÍCH CHỌN TRÊN WEB
+    if case_type == "Viết hoa toàn bộ":
+        return mapped_text.upper()
+    elif case_type == "Viết hoa chữ cái đầu":
+        # Hàm title() sẽ viết hoa chữ cái đầu của TỪNG TỪ (Ví dụ: Huấn Luyện Viên)
+        return mapped_text.title()
+    else: 
+        # Giữ nguyên gốc: Dữ liệu Excel gõ thế nào, hoặc từ viết tắt dịch ra sao thì in y hệt vậy
+        return txt_goc
     
     mapping = {
         "HLV": "Huấn Luyện Viên", "VĐV": "Vận Động Viên", "VDV": "Vận Động Viên", "BTC": "Ban Tổ Chức",
