@@ -51,7 +51,7 @@ def bo_dau_tieng_viet(text):
 def chuan_hoa_chu(text):
     if pd.isna(text): return ""
     text = re.sub(r'\s+', ' ', str(text).strip())
-    return unicodedata.normalize('NFC', text.upper())
+    return unicodedata.normalize('NFC', text) # Giữ nguyên gốc để xử lý case_type sau
 
 def load_users():
     if os.path.exists(USER_FILE):
@@ -70,10 +70,10 @@ def get_default_config(ref_w, ref_h):
         'font_name': 'Arial Bold',
         'img_x': int(ref_w * 0.08), 'img_y': int(ref_h * 0.62),
         'img_w': int(ref_w * 0.31), 'img_h': int(ref_h * 0.28),
-        'l1_color': '#ED1C24', 'l1_size': int(ref_w * 0.06), 'l1_x': int(ref_w * 0.68), 'l1_y': int(ref_h * 0.68),
-        'l2_color': '#ED1C24', 'l2_size': int(ref_w * 0.06), 'l2_x': int(ref_w * 0.68), 'l2_y': int(ref_h * 0.74),
-        'l3_color': '#ED1C24', 'l3_size': int(ref_w * 0.06), 'l3_x': int(ref_w * 0.68), 'l3_y': int(ref_h * 0.80),
-        'l4_color': '#ED1C24', 'l4_size': int(ref_w * 0.06), 'l4_x': int(ref_w * 0.68), 'l4_y': int(ref_h * 0.86),
+        'l1_color': '#ED1C24', 'l1_size': int(ref_w * 0.06), 'l1_x': int(ref_w * 0.68), 'l1_y': int(ref_h * 0.68), 'l1_case': 'Viết hoa toàn bộ',
+        'l2_color': '#ED1C24', 'l2_size': int(ref_w * 0.06), 'l2_x': int(ref_w * 0.68), 'l2_y': int(ref_h * 0.74), 'l2_case': 'Viết hoa toàn bộ',
+        'l3_color': '#ED1C24', 'l3_size': int(ref_w * 0.06), 'l3_x': int(ref_w * 0.68), 'l3_y': int(ref_h * 0.80), 'l3_case': 'Viết hoa toàn bộ',
+        'l4_color': '#ED1C24', 'l4_size': int(ref_w * 0.06), 'l4_x': int(ref_w * 0.68), 'l4_y': int(ref_h * 0.86), 'l4_case': 'Viết hoa toàn bộ',
     }
 
 def load_config(default_cfg):
@@ -179,7 +179,8 @@ def ve_chu_tu_dong_co_gian(draw, text, center_x, y, font_name, initial_size, fil
     except Exception as e:
         draw.text((center_x, y), text, fill=fill, font=font)
 
-def xu_ly_text_in_the(text):
+# ĐỘNG CƠ XỬ LÝ CHỮ NÂNG CẤP (HỖ TRỢ TÙY CHỌN VIẾT HOA)
+def xu_ly_text_in_the(text, case_type="Viết hoa toàn bộ"):
     if pd.isna(text): return ""
     text = str(text).strip()
     if text.upper() == "NAN" or text == "": return ""
@@ -188,12 +189,23 @@ def xu_ly_text_in_the(text):
     if re.match(r"^\d{1,2}/\d{1,2}/\d{4}", text): return text.split("/")[-1]
     if text.endswith(".0"): text = text[:-2]
     
-    txt_upper = chuan_hoa_chu(text)
+    txt_goc = chuan_hoa_chu(text)
+    txt_upper = txt_goc.upper()
+    
     mapping = {
-        "HLV": "HUẤN LUYỆN VIÊN", "VĐV": "VẬN ĐỘNG VIÊN", "VDV": "VẬN ĐỘNG VIÊN", "BTC": "BAN TỔ CHỨC",
-        "TRƯỞNG ĐOÀN": "TRƯỞNG ĐOÀN", "HLV TRƯỞNG": "HLV TRƯỞNG", "THƯ KÝ": "THƯ KÝ", "TRỌNG TÀI": "TRỌNG TÀI"
+        "HLV": "Huấn Luyện Viên", "VĐV": "Vận Động Viên", "VDV": "Vận Động Viên", "BTC": "Ban Tổ Chức",
+        "TRƯỞNG ĐOÀN": "Trưởng Đoàn", "HLV TRƯỞNG": "HLV Trưởng", "THƯ KÝ": "Thư Ký", "TRỌNG TÀI": "Trọng Tài"
     }
-    return mapping.get(txt_upper, txt_upper)
+    
+    mapped_text = mapping.get(txt_upper, txt_goc)
+    
+    # Áp dụng định dạng chữ theo tùy chọn của người dùng
+    if case_type == "Viết hoa toàn bộ":
+        return mapped_text.upper()
+    elif case_type == "Viết hoa chữ cái đầu":
+        return mapped_text.title()
+    else: # Giữ nguyên gốc
+        return mapped_text
 
 def tao_the_ca_nhan(data, img_info, chi_in_noi_dung, cfg, col_l1, col_l2, col_l3, col_l4, excel_row, idx_count, phoi_vdv, phoi_hlv, phoi_tam):
     all_vals = [str(val) for val in data.tolist() if pd.notna(val)]
@@ -239,17 +251,19 @@ def tao_the_ca_nhan(data, img_info, chi_in_noi_dung, cfg, col_l1, col_l2, col_l3
         except Exception: pass
 
     max_text_width = int(phoi_w * 0.55) 
+    
+    # KẾT HỢP DỮ LIỆU CÙNG VỚI TÙY CHỌN IN HOA
     if col_l1 != "--- Không in ---" and pd.notna(data.get(col_l1)):
-        txt = xu_ly_text_in_the(data.get(col_l1))
+        txt = xu_ly_text_in_the(data.get(col_l1), cfg.get('l1_case', "Viết hoa toàn bộ"))
         ve_chu_tu_dong_co_gian(draw, txt, cfg['l1_x'], cfg['l1_y'], cfg['font_name'], cfg['l1_size'], cfg['l1_color'], max_text_width)
     if col_l2 != "--- Không in ---" and pd.notna(data.get(col_l2)):
-        txt = xu_ly_text_in_the(data.get(col_l2))
+        txt = xu_ly_text_in_the(data.get(col_l2), cfg.get('l2_case', "Viết hoa toàn bộ"))
         ve_chu_tu_dong_co_gian(draw, txt, cfg['l2_x'], cfg['l2_y'], cfg['font_name'], cfg['l2_size'], cfg['l2_color'], max_text_width)
     if col_l3 != "--- Không in ---" and pd.notna(data.get(col_l3)):
-        txt = xu_ly_text_in_the(data.get(col_l3))
+        txt = xu_ly_text_in_the(data.get(col_l3), cfg.get('l3_case', "Viết hoa toàn bộ"))
         ve_chu_tu_dong_co_gian(draw, txt, cfg['l3_x'], cfg['l3_y'], cfg['font_name'], cfg['l3_size'], cfg['l3_color'], max_text_width)
     if col_l4 != "--- Không in ---" and pd.notna(data.get(col_l4)):
-        txt = xu_ly_text_in_the(data.get(col_l4))
+        txt = xu_ly_text_in_the(data.get(col_l4), cfg.get('l4_case', "Viết hoa toàn bộ"))
         ve_chu_tu_dong_co_gian(draw, txt, cfg['l4_x'], cfg['l4_y'], cfg['font_name'], cfg['l4_size'], cfg['l4_color'], max_text_width)
 
     path_luu_tam = os.path.join(OUTPUT_DIR, f"the_don_{idx_count}.jpg")
@@ -302,7 +316,6 @@ else:
         st.title("🔑 TRUNG TÂM QUẢN LÝ HỆ THỐNG")
         all_users = load_users()
         
-        # BỔ SUNG TAB QUẢN LÝ PHÔI THẺ TRỰC TIẾP
         tab_admin, tab_sub_users, tab_phoi = st.tabs(["🔒 Đổi mật khẩu Admin", "👥 Cấp tài khoản người dùng", "🖼️ Quản lý Phôi Thẻ"])
         
         with tab_admin:
@@ -355,14 +368,12 @@ else:
                         st.rerun()
             else: st.info("Chưa có tài khoản phụ nào được cấp.")
 
-        # GIAO DIỆN QUẢN LÝ PHÔI THẺ TRỰC TIẾP
         with tab_phoi:
             st.subheader("🖼️ Quản lý & Cập nhật Phôi Thẻ trực tiếp")
             st.info("💡 Không cần dùng GitHub! Bạn có thể tải lên file phôi ảnh (PNG/JPG) mới cho giải đấu ngay tại đây. Cập nhật xong có thể vào mục Tạo Thẻ in ngay lập tức.")
             
             col_p1, col_p2, col_p3 = st.columns(3)
             
-            # Khối Vận Động Viên
             with col_p1:
                 st.markdown("#### 1. Phôi Vận Động Viên")
                 if os.path.exists(PHOI_VDV_PATH): st.image(PHOI_VDV_PATH, use_container_width=True)
@@ -373,7 +384,6 @@ else:
                     st.success("✅ Đã cập nhật phôi VĐV thành công!")
                     st.rerun()
 
-            # Khối Ban Huấn Luyện
             with col_p2:
                 st.markdown("#### 2. Phôi Ban Huấn Luyện")
                 if os.path.exists(PHOI_HLV_PATH): st.image(PHOI_HLV_PATH, use_container_width=True)
@@ -384,7 +394,6 @@ else:
                     st.success("✅ Đã cập nhật phôi HLV thành công!")
                     st.rerun()
 
-            # Khối Thẻ Tạm Thời
             with col_p3:
                 st.markdown("#### 3. Phôi Thẻ Tạm / Khách Mời")
                 if os.path.exists(PHOI_TAM_PATH): st.image(PHOI_TAM_PATH, use_container_width=True)
@@ -471,43 +480,59 @@ else:
         default_cfg = get_default_config(ref_w, ref_h)
         cfg = load_config(default_cfg)
 
-        st.markdown("### ⚙️ 3. Căn chỉnh Tọa độ & Cỡ chữ:")
+        st.markdown("### ⚙️ 3. Căn chỉnh Tọa độ, Cỡ chữ & Định dạng:")
         danh_sach_font = ["Arial Bold", "Times New Roman Bold", "Tahoma Bold", "Calibri Bold"]
         font_hien_tai = cfg.get('font_name', "Arial Bold")
         cfg['font_name'] = st.selectbox("🔤 Chọn kiểu phông chữ:", danh_sach_font, index=danh_sach_font.index(font_hien_tai) if font_hien_tai in danh_sach_font else 0)
 
-        with st.expander("🛠️ Bấm vào đây để KÉO ẢNH & ĐỔI MÀU CHỮ (Tự động lưu)", expanded=False):
+        # GIAO DIỆN TÙY CHỈNH CHỮ ĐƯỢC NÂNG CẤP TÍCH CHỌN IN HOA
+        with st.expander("🛠️ Bấm vào đây để KÉO ẢNH & ĐỔI MÀU/KIỂU CHỮ (Tự động lưu)", expanded=False):
             tab_img, tab_txt1, tab_txt2 = st.tabs(["📸 Ảnh chân dung", "🔤 Dòng 1 & Dòng 2", "🔤 Dòng 3 & Dòng 4"])
+            
             with tab_img:
                 col1, col2 = st.columns(2)
                 cfg['img_x'] = col1.number_input("Vị trí ngang X (Ảnh)", value=int(cfg['img_x']), step=10)
                 cfg['img_y'] = col2.number_input("Vị trí dọc Y (Ảnh)", value=int(cfg['img_y']), step=10)
                 cfg['img_w'] = col1.number_input("Chiều rộng ảnh", value=int(cfg['img_w']), step=10)
                 cfg['img_h'] = col2.number_input("Chiều cao ảnh", value=int(cfg['img_h']), step=10)
+            
+            danh_sach_kieu_chu = ["Viết hoa toàn bộ", "Viết hoa chữ cái đầu", "Giữ nguyên gốc"]
+            
             with tab_txt1:
-                st.markdown("**🔹 Cấu hình Dòng 1**")
-                cfg['l1_color'] = st.color_picker("🎨 Màu Dòng 1:", value=cfg['l1_color'])
+                st.markdown("🔹 **Cấu hình Dòng 1**")
+                col_c1, col_c2 = st.columns([1, 3])
+                cfg['l1_color'] = col_c1.color_picker("🎨 Màu Dòng 1:", value=cfg['l1_color'])
+                cfg['l1_case'] = col_c2.radio("Kiểu chữ Dòng 1:", danh_sach_kieu_chu, index=danh_sach_kieu_chu.index(cfg.get('l1_case', 'Viết hoa toàn bộ')), horizontal=True)
                 col1, col2, col3 = st.columns(3)
                 cfg['l1_size'] = col1.number_input("Cỡ chữ Dòng 1", value=int(cfg['l1_size']), step=5)
                 cfg['l1_x'] = col2.number_input("Tâm X Dòng 1", value=int(cfg['l1_x']), step=10)
                 cfg['l1_y'] = col3.number_input("Vị trí Y Dòng 1", value=int(cfg['l1_y']), step=10)
+                
                 st.markdown("---")
-                st.markdown("**🔹 Cấu hình Dòng 2**")
-                cfg['l2_color'] = st.color_picker("🎨 Màu Dòng 2:", value=cfg['l2_color'])
+                st.markdown("🔹 **Cấu hình Dòng 2**")
+                col_c1, col_c2 = st.columns([1, 3])
+                cfg['l2_color'] = col_c1.color_picker("🎨 Màu Dòng 2:", value=cfg['l2_color'])
+                cfg['l2_case'] = col_c2.radio("Kiểu chữ Dòng 2:", danh_sach_kieu_chu, index=danh_sach_kieu_chu.index(cfg.get('l2_case', 'Viết hoa toàn bộ')), horizontal=True)
                 col1, col2, col3 = st.columns(3)
                 cfg['l2_size'] = col1.number_input("Cỡ chữ Dòng 2", value=int(cfg['l2_size']), step=5)
                 cfg['l2_x'] = col2.number_input("Tâm X Dòng 2", value=int(cfg['l2_x']), step=10)
                 cfg['l2_y'] = col3.number_input("Vị trí Y Dòng 2", value=int(cfg['l2_y']), step=10)
+                
             with tab_txt2:
-                st.markdown("**🔹 Cấu hình Dòng 3**")
-                cfg['l3_color'] = st.color_picker("🎨 Màu Dòng 3:", value=cfg['l3_color'])
+                st.markdown("🔹 **Cấu hình Dòng 3**")
+                col_c1, col_c2 = st.columns([1, 3])
+                cfg['l3_color'] = col_c1.color_picker("🎨 Màu Dòng 3:", value=cfg['l3_color'])
+                cfg['l3_case'] = col_c2.radio("Kiểu chữ Dòng 3:", danh_sach_kieu_chu, index=danh_sach_kieu_chu.index(cfg.get('l3_case', 'Viết hoa toàn bộ')), horizontal=True)
                 col1, col2, col3 = st.columns(3)
                 cfg['l3_size'] = col1.number_input("Cỡ chữ Dòng 3", value=int(cfg['l3_size']), step=5)
                 cfg['l3_x'] = col2.number_input("Tâm X Dòng 3", value=int(cfg['l3_x']), step=10)
                 cfg['l3_y'] = col3.number_input("Vị trí Y Dòng 3", value=int(cfg['l3_y']), step=10)
+                
                 st.markdown("---")
-                st.markdown("**🔹 Cấu hình Dòng 4**")
-                cfg['l4_color'] = st.color_picker("🎨 Màu Dòng 4:", value=cfg['l4_color'])
+                st.markdown("🔹 **Cấu hình Dòng 4**")
+                col_c1, col_c2 = st.columns([1, 3])
+                cfg['l4_color'] = col_c1.color_picker("🎨 Màu Dòng 4:", value=cfg['l4_color'])
+                cfg['l4_case'] = col_c2.radio("Kiểu chữ Dòng 4:", danh_sach_kieu_chu, index=danh_sach_kieu_chu.index(cfg.get('l4_case', 'Viết hoa toàn bộ')), horizontal=True)
                 col1, col2, col3 = st.columns(3)
                 cfg['l4_size'] = col1.number_input("Cỡ chữ Dòng 4", value=int(cfg['l4_size']), step=5)
                 cfg['l4_x'] = col2.number_input("Tâm X Dòng 4", value=int(cfg['l4_x']), step=10)
