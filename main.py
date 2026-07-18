@@ -28,7 +28,6 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 st.set_page_config(page_title="Phần mềm Thẻ Taekwondo", page_icon="🥋", layout="wide")
 
-# --- XÓA LOGO VÀ MENU MẶC ĐỊNH CỦA STREAMLIT ---
 hide_st_style = """
             <style>
             #MainMenu {visibility: hidden;}
@@ -92,58 +91,70 @@ def save_config(cfg):
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f: json.dump(cfg, f, ensure_ascii=False, indent=4)
     except Exception as e: pass
 
-# --- BỘ MÁY BÓC TÁCH ẢNH HOÀN THIỆN ---
+# =========================================================
+# BỘ QUÉT ẢNH V4: MẮT THẦN CHỐNG NHIỄU & KHÔNG PHÂN BIỆT HOA/THƯỜNG
+# =========================================================
 def extract_images_from_excel(file_buffer, target_sheet_name):
     img_dir = os.path.join(OUTPUT_DIR, "extracted_images")
     os.makedirs(img_dir, exist_ok=True)
     images_info = []
+    
+    target_drawing = None
     try:
         with zipfile.ZipFile(file_buffer, 'r') as archive:
-            wb_xml = archive.read('xl/workbook.xml')
-            wb_root = ET.fromstring(wb_xml)
-            sheet_rid = None
-            for sheet in wb_root.iter():
-                if sheet.tag.endswith('sheet'):
-                    if sheet.attrib.get('name') == target_sheet_name:
-                        # CHUẨN XÁC: Phải lấy mã r:id thì mới không bị lỗi Sheet
-                        sheet_rid = sheet.attrib.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id')
+            # Lục tìm file workbook.xml một cách bất chấp Hoa/Thường
+            wb_name = next((f for f in archive.namelist() if f.lower() == 'xl/workbook.xml'), None)
+            if wb_name:
+                wb_root = ET.fromstring(archive.read(wb_name))
+                sheet_rid = None
+                for sheet in wb_root.iter():
+                    if sheet.tag.endswith('sheet') and sheet.attrib.get('name') == target_sheet_name:
+                        for k, v in sheet.attrib.items():
+                            if k.endswith('id'): sheet_rid = v
                         break 
 
-            sheet_path = None
-            if sheet_rid:
-                rels_xml = archive.read('xl/_rels/workbook.xml.rels')
-                rels_root = ET.fromstring(rels_xml)
-                for rel in rels_root.iter():
-                    if rel.attrib.get('Id') == sheet_rid:
-                        sheet_path = rel.attrib.get('Target')
-                        break
-                        
-            target_drawing = None
-            if sheet_path:
-                sheet_name = os.path.basename(sheet_path)
-                sheet_dir = os.path.dirname(sheet_path)
-                if sheet_dir: sheet_dir = f"{sheet_dir}/"
-                else: sheet_dir = ""
-                
-                sheet_rels_path = f"xl/{sheet_dir}_rels/{sheet_name}.rels"
-                if sheet_rels_path in archive.namelist():
-                    sh_rels = ET.fromstring(archive.read(sheet_rels_path))
-                    for rel in sh_rels.iter():
-                        if 'drawing' in str(rel.attrib.get('Type', '')):
-                            target = rel.attrib.get('Target')
-                            target_name = os.path.basename(target)
-                            target_drawing = f"xl/drawings/{target_name}"
-                            break
+                if sheet_rid:
+                    wb_rels_name = next((f for f in archive.namelist() if f.lower() == 'xl/_rels/workbook.xml.rels'), None)
+                    if wb_rels_name:
+                        rels_root = ET.fromstring(archive.read(wb_rels_name))
+                        sheet_target = None
+                        for rel in rels_root.iter():
+                            if rel.attrib.get('Id') == sheet_rid:
+                                sheet_target = rel.attrib.get('Target')
+                                break
+                                
+                        if sheet_target:
+                            if sheet_target.startswith('/xl/'): sheet_target = sheet_target[4:]
+                            elif sheet_target.startswith('xl/'): sheet_target = sheet_target[3:]
+                            
+                            sheet_dir = os.path.dirname(sheet_target)
+                            sheet_base = os.path.basename(sheet_target)
+                            rel_path = f"xl/{sheet_dir}/_rels/{sheet_base}.rels".replace('//', '/')
+                            actual_rel_path = next((f for f in archive.namelist() if f.lower() == rel_path.lower()), None)
+                            
+                            if actual_rel_path:
+                                sh_rels = ET.fromstring(archive.read(actual_rel_path))
+                                for rel in sh_rels.iter():
+                                    if 'drawing' in str(rel.attrib.get('Type', '')).lower():
+                                        dt_base = os.path.basename(rel.attrib.get('Target'))
+                                        target_drawing = next((f for f in archive.namelist() if f.lower().endswith(f'/drawings/{dt_base}'.lower())), None)
+                                        break
+    except Exception: pass
 
-            drawings_list = [target_drawing] if target_drawing and target_drawing in archive.namelist() else [f for f in archive.namelist() if f.startswith('xl/drawings/') and f.endswith('.xml') and '_rels' not in f]
+    try:
+        with zipfile.ZipFile(file_buffer, 'r') as archive:
+            # Nếu vì lý do gì đó không cô lập được Sheet, máy sẽ lấy toàn bộ ảnh để không bị xịt
+            drawings_list = [target_drawing] if target_drawing else [f for f in archive.namelist() if f.lower().startswith('xl/drawings/') and f.lower().endswith('.xml') and '_rels' not in f.lower()]
 
             for draw_file in drawings_list:
                 try:
                     filename = os.path.basename(draw_file)
-                    rel_file = f"xl/drawings/_rels/{filename}.rels"
+                    rel_file_to_check = f"xl/drawings/_rels/{filename}.rels"
+                    actual_rel_file = next((f for f in archive.namelist() if f.lower() == rel_file_to_check.lower()), None)
+                    
                     image_map = {}
-                    if rel_file in archive.namelist():
-                        rel_root = ET.fromstring(archive.read(rel_file))
+                    if actual_rel_file:
+                        rel_root = ET.fromstring(archive.read(actual_rel_file))
                         for child in rel_root.iter():
                             rId = child.attrib.get('Id')
                             target = child.attrib.get('Target')
@@ -180,8 +191,10 @@ def extract_images_from_excel(file_buffer, target_sheet_name):
                                 
                                 if rId and rId in image_map and row >= 0:
                                     img_name = image_map[rId]
-                                    img_path_in_zip = f"xl/media/{img_name}"
-                                    if img_path_in_zip in archive.namelist():
+                                    # Móc chính xác file ảnh ra bất chấp đường dẫn rườm rà
+                                    img_path_in_zip = next((f for f in archive.namelist() if os.path.basename(f) == img_name), None)
+                                    
+                                    if img_path_in_zip:
                                         out_path = os.path.join(img_dir, f"img_{uuid.uuid4().hex}.png")
                                         with open(out_path, "wb") as f: f.write(archive.read(img_path_in_zip))
                                         images_info.append({'row': row, 'col': col, 'rowOff': rowOff, 'path': out_path, 'rot': rot})
@@ -239,7 +252,6 @@ def xu_ly_text_in_the(text, case_type="Viết hoa toàn bộ"):
     
     txt_lower = text.lower()
     
-    # BỔ SUNG TỪ ĐIỂN SONG NGỮ
     mapping = {
         "hlv": "Huấn Luyện Viên", 
         "vdv": "Vận Động Viên", 
@@ -249,7 +261,8 @@ def xu_ly_text_in_the(text, case_type="Viết hoa toàn bộ"):
         "hlv trưởng": "HLV Trưởng", 
         "thư ký": "Thư Ký", 
         "trọng tài": "Trọng Tài",
-        "organizer": "Organizer"
+        "organizer": "Organizer",
+        "head of team": "Trưởng Đoàn"
     }
     
     if case_type == "Viết hoa toàn bộ":
@@ -269,8 +282,8 @@ def tao_the_ca_nhan(data, img_info, chi_in_noi_dung, cfg, col_l1, col_l2, col_l3
     all_vals = [str(val) for val in data.tolist() if pd.notna(val)]
     all_text_clean = " ".join([bo_dau_tieng_viet(val) for val in all_vals])
     
-    chuc_vu_vip = ["HLV", "HUAN LUYEN VIEN", "TRONG TAI", "BTC", "TRUONG DOAN", "BAN TO CHUC", "THU KY", "ORGANIZER"]
-    chuc_vu_tam = ["TAM THOI", "KHACH MOI", "BAO CHI", "TINH NGUYEN", "VIP", "DAI BIEU", "TNV"]
+    chuc_vu_vip = ["HLV", "HUAN LUYEN VIEN", "TRONG TAI", "BTC", "TRUONG DOAN", "BAN TO CHUC", "THU KY", "ORGANIZER", "HEAD OF TEAM", "MANAGER"]
+    chuc_vu_tam = ["TAM THOI", "KHACH MOI", "BAO CHI", "TINH NGUYEN", "VIP", "DAI BIEU", "TNV", "GUEST"]
     
     is_hlv = any(kw in all_text_clean for kw in chuc_vu_vip)
     is_tam = any(kw in all_text_clean for kw in chuc_vu_tam)
@@ -769,7 +782,6 @@ else:
             col_l3 = col_c.selectbox("Dòng 3 in cột:", cols_list, index=def_l3)
             col_l4 = col_d.selectbox("Dòng 4 in cột:", cols_list, index=def_l4)
 
-            # --- KIỂM SOÁT DANH SÁCH RỖNG BẢO MẬT ---
             col_thuc_te = []
             if col_l1 != "--- Không in ---": col_thuc_te.append(col_l1)
             if col_l2 != "--- Không in ---": col_thuc_te.append(col_l2)
@@ -786,19 +798,14 @@ else:
             df = df.dropna(subset=[col_id])
             df = df.ffill()
 
+            # --- THUẬT TOÁN "NAM CHÂM" (HÚT ẢNH THÔNG MINH BẤT CHẤP CỘT NÀO) ---
             if ban_do_anh:
-                # TÌM CỘT CHỨA NHIỀU ẢNH NHẤT (Khóa mục tiêu vào cột ảnh chân dung, bỏ qua logo rác)
-                phobien_col = Counter([img['col'] for img in ban_do_anh]).most_common(1)[0][0]
-                valid_images_raw = [img for img in ban_do_anh if img['col'] == phobien_col]
-                
-                dict_images = {}
-                for img in valid_images_raw:
-                    dict_images[img['row']] = img 
-                    
-                valid_images = list(dict_images.values())
-                for img in valid_images: img['used'] = False
+                # Ưu tiên 1: Dòng từ trên xuống dưới (row tăng dần)
+                # Ưu tiên 2: Cột từ phải qua trái (col giảm dần) -> Né việc hút nhầm logo giải đấu nằm ở mép trái
+                ban_do_anh.sort(key=lambda x: (x['row'], -x['col']))
+                for img in ban_do_anh: img['used'] = False
             else: 
-                valid_images = []
+                ban_do_anh = []
 
             persons = []
             for idx, row in df.iterrows():
@@ -806,20 +813,25 @@ else:
                 current_excel_row = current_xml_row + 1
                 persons.append({'row_data': row, 'xml_row': current_xml_row, 'excel_row': current_excel_row, 'img_info': None})
 
+            # Gán ảnh bằng cơ chế lực hút Nam Châm
             for p in persons:
-                for img in valid_images:
-                    if not img.get('used') and img['row'] == p['xml_row']: 
-                        p['img_info'] = img
-                        img['used'] = True
-                        break
-                        
-            for p in persons:
-                if p['img_info'] is None:
-                    for img in valid_images:
-                        if not img.get('used') and abs(img['row'] - p['xml_row']) <= 2: 
-                            p['img_info'] = img
-                            img['used'] = True
+                best_img = None
+                min_dist = 999
+                for img in ban_do_anh:
+                    if not img.get('used'):
+                        dist = abs(img['row'] - p['xml_row'])
+                        if dist == 0:
+                            # Trúng phóc dòng thì chốt luôn ảnh đó
+                            best_img = img
                             break
+                        elif dist < min_dist and dist <= 2:
+                            # Cứu vớt các ảnh bị dán trượt tay (sai lệch 1-2 dòng)
+                            min_dist = dist
+                            best_img = img
+
+                if best_img:
+                    p['img_info'] = best_img
+                    best_img['used'] = True
 
             nguoi_bi_ngang = []
             for p in persons:
