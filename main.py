@@ -92,51 +92,50 @@ def save_config(cfg):
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f: json.dump(cfg, f, ensure_ascii=False, indent=4)
     except Exception as e: pass
 
-def extract_images_from_excel(file_buffer):
+# --- CỖ MÁY BÓC TÁCH ẢNH THẾ HỆ MỚI (CHỈ ĐỌC ĐÚNG SHEET ĐƯỢC CHỌN) ---
+def extract_images_from_excel(file_buffer, target_sheet_name):
     img_dir = os.path.join(OUTPUT_DIR, "extracted_images")
     os.makedirs(img_dir, exist_ok=True)
     images_info = []
     try:
         with zipfile.ZipFile(file_buffer, 'r') as archive:
-            target_drawing = None
-            try:
-                wb_xml = archive.read('xl/workbook.xml')
-                wb_root = ET.fromstring(wb_xml)
-                sheet_rid = None
-                for sheet in wb_root.iter():
-                    if sheet.tag.endswith('sheet'):
+            wb_xml = archive.read('xl/workbook.xml')
+            wb_root = ET.fromstring(wb_xml)
+            sheet_rid = None
+            for sheet in wb_root.iter():
+                if sheet.tag.endswith('sheet'):
+                    if sheet.attrib.get('name') == target_sheet_name:
                         for k, v in sheet.attrib.items():
                             if k.endswith('id'):
                                 sheet_rid = v
                                 break
                         break 
 
-                sheet_path = None
-                if sheet_rid:
-                    rels_xml = archive.read('xl/_rels/workbook.xml.rels')
-                    rels_root = ET.fromstring(rels_xml)
-                    for rel in rels_root.iter():
-                        if rel.attrib.get('Id') == sheet_rid:
-                            sheet_path = rel.attrib.get('Target')
+            sheet_path = None
+            if sheet_rid:
+                rels_xml = archive.read('xl/_rels/workbook.xml.rels')
+                rels_root = ET.fromstring(rels_xml)
+                for rel in rels_root.iter():
+                    if rel.attrib.get('Id') == sheet_rid:
+                        sheet_path = rel.attrib.get('Target')
+                        break
+                        
+            target_drawing = None
+            if sheet_path:
+                sheet_name = os.path.basename(sheet_path)
+                sheet_dir = os.path.dirname(sheet_path)
+                if sheet_dir: sheet_dir = f"{sheet_dir}/"
+                else: sheet_dir = ""
+                
+                sheet_rels_path = f"xl/{sheet_dir}_rels/{sheet_name}.rels"
+                if sheet_rels_path in archive.namelist():
+                    sh_rels = ET.fromstring(archive.read(sheet_rels_path))
+                    for rel in sh_rels.iter():
+                        if 'drawing' in rel.attrib.get('Type', ''):
+                            target = rel.attrib.get('Target')
+                            target_name = os.path.basename(target)
+                            target_drawing = f"xl/drawings/{target_name}"
                             break
-                            
-                if sheet_path:
-                    sheet_name = os.path.basename(sheet_path)
-                    sheet_dir = os.path.dirname(sheet_path)
-                    if sheet_dir: sheet_dir = f"{sheet_dir}/"
-                    else: sheet_dir = ""
-                    
-                    sheet_rels_path = f"xl/{sheet_dir}_rels/{sheet_name}.rels"
-                    if sheet_rels_path in archive.namelist():
-                        sh_rels = ET.fromstring(archive.read(sheet_rels_path))
-                        for rel in sh_rels.iter():
-                            if 'drawing' in rel.attrib.get('Type', ''):
-                                target = rel.attrib.get('Target')
-                                target_name = os.path.basename(target)
-                                target_drawing = f"xl/drawings/{target_name}"
-                                break
-            except Exception:
-                pass
 
             drawings_list = [target_drawing] if target_drawing and target_drawing in archive.namelist() else [f for f in archive.namelist() if f.startswith('xl/drawings/') and f.endswith('.xml') and '_rels' not in f]
 
@@ -250,7 +249,8 @@ def xu_ly_text_in_the(text, case_type="Viết hoa toàn bộ"):
         "trưởng đoàn": "Trưởng Đoàn", 
         "hlv trưởng": "HLV Trưởng", 
         "thư ký": "Thư Ký", 
-        "trọng tài": "Trọng Tài"
+        "trọng tài": "Trọng Tài",
+        "organizer": "Organizer"
     }
     
     if case_type == "Viết hoa toàn bộ":
@@ -709,27 +709,37 @@ else:
         save_config(cfg)
 
         st.markdown("---")
-        col_up1, col_up2 = st.columns([3, 1])
-        with col_up1:
-            file_excel = st.file_uploader("📂 4. Chọn file Excel danh sách:", type=["xlsx"])
-        with col_up2:
-            st.markdown("<br>", unsafe_allow_html=True)
-            header_row = st.number_input("⚙️ Dòng chứa Tiêu đề cột:", min_value=1, value=4, step=1)
+        
+        file_excel = st.file_uploader("📂 4. Chọn file Excel danh sách:", type=["xlsx"])
         
         if file_excel is not None:
             file_bytes = file_excel.getvalue()
-            file_id = f"{file_excel.name}_{file_excel.size}_{header_row}"
             
-            if st.session_state.get('current_file_id') != file_id:
-                st.session_state['current_file_id'] = file_id
-                with st.spinner("⏳ Đang xử lý dữ liệu và bóc tách ảnh (Chỉ chạy 1 lần duy nhất để chống lag)..."):
-                    skip_r = int(header_row) - 1
-                    df_raw = pd.read_excel(io.BytesIO(file_bytes), skiprows=skip_r)
-                    st.session_state['raw_df'] = df_raw
-                    st.session_state['ban_do_anh'] = extract_images_from_excel(io.BytesIO(file_bytes))
+            # --- CẢI TIẾN: CHO PHÉP NGƯỜI DÙNG CHỌN SHEET ---
+            try:
+                xls = pd.ExcelFile(io.BytesIO(file_bytes), engine='openpyxl')
+                danh_sach_sheet = xls.sheet_names
+            except:
+                danh_sach_sheet = ["Sheet1"]
+
+            col_s1, col_s2 = st.columns([1, 1])
+            with col_s1:
+                sheet_chon = st.selectbox("📑 Chọn Sheet chứa dữ liệu:", danh_sach_sheet)
+            with col_s2:
+                header_row = st.number_input("⚙️ Dòng chứa Tiêu đề cột:", min_value=1, value=4, step=1)
+                
+            # ĐÃ XÓA CACHE ST.SESSION_STATE ĐỂ ÉP ĐỌC FILE LẠI MỖI KHI ĐỔI SHEET
+            with st.spinner("⏳ Đang xử lý dữ liệu và bóc tách ảnh..."):
+                header_idx = int(header_row) - 1
+                try:
+                    df_raw = pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet_chon, header=header_idx, engine='openpyxl')
+                except Exception as e:
+                    df_raw = pd.DataFrame() # Ép rỗng nếu lỗi
+
+                # Bóc ảnh riêng cho Sheet đã chọn
+                ban_do_anh = extract_images_from_excel(io.BytesIO(file_bytes), sheet_chon)
             
-            df_cols = st.session_state['raw_df'].copy()
-            ban_do_anh = st.session_state['ban_do_anh'].copy()
+            df_cols = df_raw.copy()
             
             clean_cols = []
             for i, c in enumerate(df_cols.columns):
@@ -738,12 +748,12 @@ else:
                 else: clean_cols.append(c_str)
             df_cols.columns = clean_cols
             
-            # BỘ LỌC CHỐNG LỖI INDEX ERROR KHI FILE EXCEL RỖNG
+            # --- HỆ THỐNG CẢNH BÁO THÔNG MINH ---
             if len(df_cols.columns) == 0:
-                st.warning("🚨 MÀN HÌNH X-QUANG TRỐNG RỖNG! Không tìm thấy cột dữ liệu nào.")
-                st.info("💡 Lỗi này thường do 2 nguyên nhân:\n- Bạn nhập sai **'Dòng chứa Tiêu đề cột'** (Dòng 4 không có chữ).\n- Dữ liệu của bạn nằm ở **Sheet khác** (Phần mềm mặc định bốc dữ liệu ở Sheet đầu tiên bên trái). Hãy mở Excel lên, kéo Sheet chứa dữ liệu ra ngoài cùng bên trái rồi lưu lại nhé!")
+                st.warning("🚨 MÀN HÌNH X-QUANG TRỐNG RỖNG! Không tìm thấy dữ liệu nào.")
+                st.info("💡 Lỗi này thường do **'Dòng Tiêu đề'** bạn chọn nằm ở một hàng trắng (không có chữ) trong Excel. Hãy mở file ra đếm lại hoặc thử chỉnh thông số ở dòng trên nhé!")
                 st.stop()
-            
+                
             st.markdown("👁️ **Màn hình X-Quang: Đây là những cột máy tính đọc được:**")
             st.dataframe(df_cols.head(2), use_container_width=True)
 
@@ -771,20 +781,14 @@ else:
             df = df.ffill()
 
             if ban_do_anh:
-                valid_images = []
+                ban_do_anh.sort(key=lambda x: x['col'], reverse=True)
+                
+                dict_images = {}
                 for img in ban_do_anh:
-                    da_co = False
-                    for v_img in valid_images:
-                        if v_img['row'] == img['row']:
-                            da_co = True
-                            if img['col'] > v_img['col']:
-                                v_img['col'] = img['col']
-                                v_img['path'] = img['path']
-                                v_img['rot'] = img['rot']
-                            break
-                    if not da_co:
-                        valid_images.append(img.copy())
+                    if img['row'] not in dict_images:
+                        dict_images[img['row']] = img 
                         
+                valid_images = list(dict_images.values())
                 for img in valid_images: img['used'] = False
             else: 
                 valid_images = []
