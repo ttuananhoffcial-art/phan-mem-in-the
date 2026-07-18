@@ -95,13 +95,61 @@ def save_config(cfg):
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f: json.dump(cfg, f, ensure_ascii=False, indent=4)
     except Exception as e: pass
 
+# --- CỖ MÁY BÓC TÁCH ẢNH THẾ HỆ MỚI (CÔ LẬP SHEET TUYỆT ĐỐI) ---
 def extract_images_from_excel(file_buffer):
     img_dir = os.path.join(OUTPUT_DIR, "extracted_images")
     os.makedirs(img_dir, exist_ok=True)
     images_info = []
     try:
         with zipfile.ZipFile(file_buffer, 'r') as archive:
-            drawings = [f for f in archive.namelist() if f.startswith('xl/drawings/') and f.endswith('.xml') and '_rels' not in f]
+            target_drawing = None
+            try:
+                # 1. Quét tìm Sheet đang được sử dụng
+                wb_xml = archive.read('xl/workbook.xml')
+                wb_root = ET.fromstring(wb_xml)
+                sheet_rId = None
+                for child in wb_root.iter():
+                    if child.tag.endswith('sheet'):
+                        sheet_rId = child.attrib.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id')
+                        if sheet_rId: break
+                        
+                if sheet_rId:
+                    # 2. Lấy đường dẫn của Sheet đó
+                    wb_rels = archive.read('xl/_rels/workbook.xml.rels')
+                    wb_rels_root = ET.fromstring(wb_rels)
+                    sheet_path = None
+                    for child in wb_rels_root.iter():
+                        if child.attrib.get('Id') == sheet_rId:
+                            sheet_path = child.attrib.get('Target')
+                            break
+                            
+                    if sheet_path:
+                        if sheet_path.startswith('/xl/'): sheet_path = sheet_path[4:]
+                        elif sheet_path.startswith('xl/'): sheet_path = sheet_path[3:]
+                        
+                        # 3. Lần mò tìm đúng file chứa ảnh của duy nhất Sheet này
+                        sheet_name = os.path.basename(sheet_path)
+                        sheet_dir = os.path.dirname(sheet_path)
+                        sheet_rels_path = f"xl/{sheet_dir}/_rels/{sheet_name}.rels"
+                        
+                        if sheet_rels_path in archive.namelist():
+                            sh_rels = archive.read(sheet_rels_path)
+                            sh_rels_root = ET.fromstring(sh_rels)
+                            for child in sh_rels_root.iter():
+                                if 'drawing' in str(child.attrib.get('Type', '')):
+                                    dt = child.attrib.get('Target')
+                                    if dt.startswith('../'): target_drawing = f"xl/{dt[3:]}"
+                                    else: target_drawing = f"xl/{sheet_dir}/{dt}"
+                                    break
+            except Exception:
+                pass
+
+            # Nếu tìm được thì chỉ trích xuất từ 1 nguồn duy nhất, chặn đứng ảnh tạp
+            if target_drawing and target_drawing in archive.namelist():
+                drawings = [target_drawing]
+            else:
+                drawings = [f for f in archive.namelist() if f.startswith('xl/drawings/') and f.endswith('.xml') and '_rels' not in f]
+            
             for draw_file in drawings:
                 try:
                     filename = os.path.basename(draw_file)
@@ -736,7 +784,6 @@ else:
                 current_excel_row = current_xml_row + 1
                 persons.append({'row_data': row, 'xml_row': current_xml_row, 'excel_row': current_excel_row, 'img_info': None})
 
-            # THUẬT TOÁN MA TRẬN V2: CHỐNG HIỆU ỨNG DOMINO CƯỚP ẢNH
             for p in persons:
                 for img in valid_images:
                     if not img.get('used') and img['row'] == p['xml_row']: 
