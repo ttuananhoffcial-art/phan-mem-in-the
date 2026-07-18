@@ -414,64 +414,138 @@ else:
                     st.rerun()
 
     # =========================================================================
-    # MODULE: IN NHANH THẺ TẠM THỜI (KHÔNG CẦN EXCEL)
+    # MODULE NÂNG CẤP: IN NHANH THẺ TẠM (CÓ TẢI ẢNH & CHỈNH TỌA ĐỘ)
     # =========================================================================
     elif menu_selection == "⏳ In nhanh Thẻ Tạm":
         st.title("⏳ IN NHANH THẺ TẠM THỜI & KHÁCH MỜI")
-        st.info("💡 Nhập trực tiếp tên Khách mời, Đại biểu hoặc Trọng tài đột xuất để in thẻ ngay tại giải đấu mà không cần file Excel.")
+        st.info("💡 Nhập thông tin Khách mời/Trọng tài, tải ảnh chân dung lên và tùy chỉnh mọi thứ y như làm thẻ từ Excel.")
+
+        ref_w, ref_h = 1000, 1400
+        if os.path.exists(PHOI_TAM_PATH):
+            try:
+                with Image.open(PHOI_TAM_PATH) as img_ref: ref_w, ref_h = img_ref.size
+            except: pass
+        cfg = load_config(get_default_config(ref_w, ref_h))
 
         col1, col2 = st.columns([1, 1.5])
         
         with col1:
-            st.markdown("### 📝 1. Nhập thông tin")
+            st.markdown("### 📝 1. Nhập thông tin & Ảnh")
             t_ten = st.text_input("Họ và Tên (Dòng 1):", placeholder="Ví dụ: NGUYỄN VĂN A").strip()
             t_chucvu = st.text_input("Chức vụ (Dòng 2):", placeholder="Ví dụ: KHÁCH MỜI").strip()
             t_donvi = st.text_input("Đơn vị/Ghi chú (Dòng 4):", placeholder="Ví dụ: BAN TỔ CHỨC").strip()
+            
+            anh_tam_tai_len = st.file_uploader("🖼️ Tải ảnh chân dung (nếu có):", type=['png', 'jpg', 'jpeg'])
 
             st.markdown("### ⚙️ 2. Cài đặt bản in")
             chi_in_noi_dung_tam = (st.radio("Tùy chọn nền phôi:", ["🖼️ In đầy đủ (Cả nền phôi)", "⬜ Chỉ in nội dung (Nền trắng)"], key="rad_tam") == "⬜ Chỉ in nội dung (Nền trắng)")
             
             col_w, col_h = st.columns(2)
-            t_width = col_w.number_input("Chiều ngang PDF (cm):", value=10.0, step=0.1)
-            t_height = col_h.number_input("Chiều cao PDF (cm):", value=14.0, step=0.1)
+            t_width = col_w.number_input("Chiều ngang PDF (cm):", value=10.0, step=0.1, key="tam_w")
+            t_height = col_h.number_input("Chiều cao PDF (cm):", value=14.0, step=0.1, key="tam_h")
             
-            t_tenfile = st.text_input("🖨️ Tên file PDF khi tải về:", value=f"The_Tam_{t_ten.replace(' ', '')}" if t_ten else "The_Khach_Moi")
+            t_tenfile = st.text_input("🖨️ Tên file PDF khi tải về:", value=f"The_Tam_{t_ten.replace(' ', '')}" if t_ten else "The_Khach_Moi", key="tam_file")
 
-            btn_tao = st.button("⚡ TẠO & XEM TRƯỚC THẺ", type="primary", use_container_width=True)
+        st.markdown("---")
+        st.markdown("### 🛠️ 3. Căn chỉnh Tọa độ, Cỡ chữ & Định dạng:")
+        danh_sach_font = ["Arial Bold", "Times New Roman Bold", "Tahoma Bold", "Calibri Bold"]
+        font_hien_tai = cfg.get('font_name', "Arial Bold")
+        cfg['font_name'] = st.selectbox("🔤 Chọn kiểu phông chữ:", danh_sach_font, index=danh_sach_font.index(font_hien_tai) if font_hien_tai in danh_sach_font else 0, key="tam_font")
 
-        with col2:
-            st.markdown("### 👁️ 3. Xem trước & Tải file")
-            if not os.path.exists(PHOI_TAM_PATH):
-                st.warning("⚠️ Hệ thống chưa có Phôi Thẻ Tạm. Vui lòng vào mục 'Quản lý hệ thống' -> 'Quản lý Phôi Thẻ' để tải ảnh phôi lên!")
-            else:
-                if btn_tao:
-                    ref_w, ref_h = 1000, 1400
-                    try:
-                        with Image.open(PHOI_TAM_PATH) as img_ref: ref_w, ref_h = img_ref.size
-                    except: pass
-                    cfg = load_config(get_default_config(ref_w, ref_h))
+        with st.expander("🛠️ Bấm vào đây để KÉO ẢNH & ĐỔI MÀU/KIỂU CHỮ (Dùng chung cấu hình)", expanded=False):
+            tab_img, tab_txt1, tab_txt2 = st.tabs(["📸 Ảnh chân dung", "🔤 Dòng 1 & Dòng 2", "🔤 Dòng 3 & Dòng 4"])
+            
+            with tab_img:
+                col_img1, col_img2 = st.columns(2)
+                cfg['img_x'] = col_img1.number_input("Vị trí ngang X (Ảnh)", value=int(cfg['img_x']), step=10, key="tam_img_x")
+                cfg['img_y'] = col_img2.number_input("Vị trí dọc Y (Ảnh)", value=int(cfg['img_y']), step=10, key="tam_img_y")
+                cfg['img_w'] = col_img1.number_input("Chiều rộng ảnh", value=int(cfg['img_w']), step=10, key="tam_img_w")
+                cfg['img_h'] = col_img2.number_input("Chiều cao ảnh", value=int(cfg['img_h']), step=10, key="tam_img_h")
+            
+            danh_sach_kieu_chu = ["Viết hoa toàn bộ", "Giữ nguyên gốc", "Viết hoa chữ cái đầu mỗi chữ", "Chỉ viết hoa chữ đầu của câu"]
+            
+            with tab_txt1:
+                st.markdown("🔹 **Cấu hình Dòng 1**")
+                col_c1, col_c2 = st.columns([1, 4])
+                cfg['l1_color'] = col_c1.color_picker("🎨 Màu Dòng 1:", value=cfg['l1_color'], key="tam_l1_color")
+                l1_idx = danh_sach_kieu_chu.index(cfg.get('l1_case')) if cfg.get('l1_case') in danh_sach_kieu_chu else 0
+                cfg['l1_case'] = col_c2.radio("Kiểu chữ Dòng 1:", danh_sach_kieu_chu, index=l1_idx, horizontal=True, key="tam_l1_case")
+                col_t1, col_t2, col_t3 = st.columns(3)
+                cfg['l1_size'] = col_t1.number_input("Cỡ chữ Dòng 1", value=int(cfg['l1_size']), step=5, key="tam_l1_size")
+                cfg['l1_x'] = col_t2.number_input("Tâm X Dòng 1", value=int(cfg['l1_x']), step=10, key="tam_l1_x")
+                cfg['l1_y'] = col_t3.number_input("Vị trí Y Dòng 1", value=int(cfg['l1_y']), step=10, key="tam_l1_y")
+                
+                st.markdown("---")
+                st.markdown("🔹 **Cấu hình Dòng 2**")
+                col_c1, col_c2 = st.columns([1, 4])
+                cfg['l2_color'] = col_c1.color_picker("🎨 Màu Dòng 2:", value=cfg['l2_color'], key="tam_l2_color")
+                l2_idx = danh_sach_kieu_chu.index(cfg.get('l2_case')) if cfg.get('l2_case') in danh_sach_kieu_chu else 0
+                cfg['l2_case'] = col_c2.radio("Kiểu chữ Dòng 2:", danh_sach_kieu_chu, index=l2_idx, horizontal=True, key="tam_l2_case")
+                col_t1, col_t2, col_t3 = st.columns(3)
+                cfg['l2_size'] = col_t1.number_input("Cỡ chữ Dòng 2", value=int(cfg['l2_size']), step=5, key="tam_l2_size")
+                cfg['l2_x'] = col_t2.number_input("Tâm X Dòng 2", value=int(cfg['l2_x']), step=10, key="tam_l2_x")
+                cfg['l2_y'] = col_t3.number_input("Vị trí Y Dòng 2", value=int(cfg['l2_y']), step=10, key="tam_l2_y")
+                
+            with tab_txt2:
+                st.markdown("🔹 **Cấu hình Dòng 3**")
+                col_c1, col_c2 = st.columns([1, 4])
+                cfg['l3_color'] = col_c1.color_picker("🎨 Màu Dòng 3:", value=cfg['l3_color'], key="tam_l3_color")
+                l3_idx = danh_sach_kieu_chu.index(cfg.get('l3_case')) if cfg.get('l3_case') in danh_sach_kieu_chu else 0
+                cfg['l3_case'] = col_c2.radio("Kiểu chữ Dòng 3:", danh_sach_kieu_chu, index=l3_idx, horizontal=True, key="tam_l3_case")
+                col_t1, col_t2, col_t3 = st.columns(3)
+                cfg['l3_size'] = col_t1.number_input("Cỡ chữ Dòng 3", value=int(cfg['l3_size']), step=5, key="tam_l3_size")
+                cfg['l3_x'] = col_t2.number_input("Tâm X Dòng 3", value=int(cfg['l3_x']), step=10, key="tam_l3_x")
+                cfg['l3_y'] = col_t3.number_input("Vị trí Y Dòng 3", value=int(cfg['l3_y']), step=10, key="tam_l3_y")
+                
+                st.markdown("---")
+                st.markdown("🔹 **Cấu hình Dòng 4**")
+                col_c1, col_c2 = st.columns([1, 4])
+                cfg['l4_color'] = col_c1.color_picker("🎨 Màu Dòng 4:", value=cfg['l4_color'], key="tam_l4_color")
+                l4_idx = danh_sach_kieu_chu.index(cfg.get('l4_case')) if cfg.get('l4_case') in danh_sach_kieu_chu else 0
+                cfg['l4_case'] = col_c2.radio("Kiểu chữ Dòng 4:", danh_sach_kieu_chu, index=l4_idx, horizontal=True, key="tam_l4_case")
+                col_t1, col_t2, col_t3 = st.columns(3)
+                cfg['l4_size'] = col_t1.number_input("Cỡ chữ Dòng 4", value=int(cfg['l4_size']), step=5, key="tam_l4_size")
+                cfg['l4_x'] = col_t2.number_input("Tâm X Dòng 4", value=int(cfg['l4_x']), step=10, key="tam_l4_x")
+                cfg['l4_y'] = col_t3.number_input("Vị trí Y Dòng 4", value=int(cfg['l4_y']), step=10, key="tam_l4_y")
 
-                    mock_data = pd.Series({"Tên": t_ten if t_ten else None, "Chức vụ": t_chucvu if t_chucvu else None, "Đơn vị": t_donvi if t_donvi else None, "Trống": None})
+        save_config(cfg)
 
-                    path_tam = tao_the_ca_nhan(
-                        data=mock_data, img_info=None, chi_in_noi_dung=chi_in_noi_dung_tam, cfg=cfg,
-                        col_l1="Tên", col_l2="Chức vụ", col_l3="Trống", col_l4="Đơn vị", excel_row=999, idx_count="nhanh",
-                        phoi_vdv=PHOI_TAM_PATH, phoi_hlv=PHOI_TAM_PATH, phoi_tam=PHOI_TAM_PATH
-                    )
+        st.markdown("---")
+        btn_tao = st.button("⚡ TẠO & XEM TRƯỚC THẺ", type="primary", use_container_width=True)
 
-                    st.image(path_tam, width=380, caption="Bản xem trước thẻ")
+        if not os.path.exists(PHOI_TAM_PATH):
+            st.warning("⚠️ Hệ thống chưa có Phôi Thẻ Tạm. Vui lòng vào mục 'Quản lý hệ thống' -> 'Quản lý Phôi Thẻ' để tải ảnh phôi lên!")
+        else:
+            if btn_tao:
+                thong_tin_anh_tam = None
+                if anh_tam_tai_len is not None:
+                    duong_dan_anh_tam = os.path.join(OUTPUT_DIR, f"temp_avatar_{uuid.uuid4().hex}.jpg")
+                    with open(duong_dan_anh_tam, "wb") as f:
+                        f.write(anh_tam_tai_len.getbuffer())
+                    thong_tin_anh_tam = {'path': duong_dan_anh_tam, 'rot': 0}
 
-                    pdf_buffer = io.BytesIO()
-                    c = canvas.Canvas(pdf_buffer, pagesize=(t_width*cm, t_height*cm))
-                    c.drawImage(path_tam, 0, 0, width=t_width*cm, height=t_height*cm)
-                    c.showPage()
-                    c.save()
+                mock_data = pd.Series({"Tên": t_ten if t_ten else None, "Chức vụ": t_chucvu if t_chucvu else None, "Đơn vị": t_donvi if t_donvi else None, "Trống": None})
 
-                    pdf_bytes = pdf_buffer.getvalue()
-                    
-                    # BỘ LỌC AN TOÀN CHO THẺ TẠM
-                    ten_file_an_toan = bo_dau_tieng_viet(t_tenfile).replace(" ", "_") + ".pdf"
-                    st.download_button(label="🖨️ TẢI FILE PDF BẢN IN NÀY NGAY", data=pdf_bytes, file_name=ten_file_an_toan, mime="application/pdf", use_container_width=True)
+                path_tam = tao_the_ca_nhan(
+                    data=mock_data, img_info=thong_tin_anh_tam, chi_in_noi_dung=chi_in_noi_dung_tam, cfg=cfg,
+                    col_l1="Tên", col_l2="Chức vụ", col_l3="Trống", col_l4="Đơn vị", excel_row=999, idx_count="nhanh",
+                    phoi_vdv=PHOI_TAM_PATH, phoi_hlv=PHOI_TAM_PATH, phoi_tam=PHOI_TAM_PATH
+                )
+
+                col_preview1, col_preview2, col_preview3 = st.columns([1, 2, 1])
+                with col_preview2:
+                    st.image(path_tam, use_container_width=True, caption="Bản xem trước thẻ")
+
+                pdf_buffer = io.BytesIO()
+                c = canvas.Canvas(pdf_buffer, pagesize=(t_width*cm, t_height*cm))
+                c.drawImage(path_tam, 0, 0, width=t_width*cm, height=t_height*cm)
+                c.showPage()
+                c.save()
+
+                pdf_bytes = pdf_buffer.getvalue()
+                
+                ten_file_an_toan = bo_dau_tieng_viet(t_tenfile).replace(" ", "_") + ".pdf"
+                st.download_button(label="🖨️ TẢI FILE PDF BẢN IN NÀY NGAY", data=pdf_bytes, file_name=ten_file_an_toan, mime="application/pdf", use_container_width=True)
 
     # =========================================================================
     # MODULE: TẠO THẺ THI ĐẤU TỪ EXCEL
@@ -652,7 +726,9 @@ else:
                 phobien_col = Counter([img['col'] for img in ban_do_anh]).most_common(1)[0][0]
                 valid_images = [img for img in ban_do_anh if img['col'] == phobien_col]
                 valid_images.sort(key=lambda x: (x['row'], x['rowOff']))
-            else: valid_images = []
+                for img in valid_images: img['used'] = False
+            else: 
+                valid_images = []
 
             persons = []
             for idx, row in df.iterrows():
@@ -660,13 +736,21 @@ else:
                 current_excel_row = current_xml_row + 1
                 persons.append({'row_data': row, 'xml_row': current_xml_row, 'excel_row': current_excel_row, 'img_info': None})
 
+            # THUẬT TOÁN MA TRẬN V2: CHỐNG HIỆU ỨNG DOMINO CƯỚP ẢNH
             for p in persons:
-                for i, img in enumerate(valid_images):
-                    if img['row'] == p['xml_row']: p['img_info'] = valid_images.pop(i); break
+                for img in valid_images:
+                    if not img.get('used') and img['row'] == p['xml_row']: 
+                        p['img_info'] = img
+                        img['used'] = True
+                        break
+                        
             for p in persons:
                 if p['img_info'] is None:
-                    for i, img in enumerate(valid_images):
-                        if abs(img['row'] - p['xml_row']) <= 1: p['img_info'] = valid_images.pop(i); break
+                    for img in valid_images:
+                        if not img.get('used') and abs(img['row'] - p['xml_row']) <= 1: 
+                            p['img_info'] = img
+                            img['used'] = True
+                            break
 
             nguoi_bi_ngang = []
             for p in persons:
@@ -730,7 +814,6 @@ else:
                             if not final_filename:
                                 final_filename = "Danh_Sach_The"
                                 
-                        # BỘ LỌC AN TOÀN CHỐNG KẸT MÁY IN
                         ten_file_an_toan = bo_dau_tieng_viet(final_filename).replace(" ", "_") + ".pdf"
 
                         pdf_buffer = io.BytesIO()
@@ -768,6 +851,5 @@ else:
                         pdf_bytes = pdf_buffer.getvalue()
                         status_text.empty(); progress_bar.empty()
                         
-                        # XUẤT RA TÊN FILE ĐÃ ĐƯỢC CHUẨN HÓA
                         st.download_button("🔥 BẤM ĐỂ TẢI FILE PDF IN NGAY 🔥", data=pdf_bytes, file_name=ten_file_an_toan, mime="application/pdf", use_container_width=True)
                         st.balloons()
