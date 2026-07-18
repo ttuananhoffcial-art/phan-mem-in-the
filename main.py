@@ -92,56 +92,52 @@ def save_config(cfg):
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f: json.dump(cfg, f, ensure_ascii=False, indent=4)
     except Exception as e: pass
 
-# =========================================================
-# LÕI QUÉT ẢNH V3 (CÔ LẬP SHEET & XÓA BÓNG MA)
-# =========================================================
 def extract_images_from_excel(file_buffer):
     img_dir = os.path.join(OUTPUT_DIR, "extracted_images")
     os.makedirs(img_dir, exist_ok=True)
     images_info = []
     try:
         with zipfile.ZipFile(file_buffer, 'r') as archive:
-            # 1. Tìm chính xác ID của Sheet đầu tiên (Chống đọc nhầm Sheet khác)
-            wb_xml = archive.read('xl/workbook.xml')
-            wb_root = ET.fromstring(wb_xml)
-            sheet_rid = None
-            for sheet in wb_root.iter():
-                if sheet.tag.endswith('sheet'):
-                    for k, v in sheet.attrib.items():
-                        if k.endswith('id'):
-                            sheet_rid = v
-                            break
-                    break 
-
-            # 2. Định vị file cấu trúc của Sheet đầu tiên
-            sheet_path = None
-            if sheet_rid:
-                rels_xml = archive.read('xl/_rels/workbook.xml.rels')
-                rels_root = ET.fromstring(rels_xml)
-                for rel in rels_root.iter():
-                    if rel.attrib.get('Id') == sheet_rid:
-                        sheet_path = rel.attrib.get('Target')
-                        break
-                        
-            # 3. Móc ra đúng file Drawing của Sheet đó
             target_drawing = None
-            if sheet_path:
-                sheet_name = os.path.basename(sheet_path)
-                sheet_dir = os.path.dirname(sheet_path)
-                if sheet_dir: sheet_dir = f"{sheet_dir}/"
-                else: sheet_dir = ""
-                
-                sheet_rels_path = f"xl/{sheet_dir}_rels/{sheet_name}.rels"
-                if sheet_rels_path in archive.namelist():
-                    sh_rels = ET.fromstring(archive.read(sheet_rels_path))
-                    for rel in sh_rels.iter():
-                        if 'drawing' in rel.attrib.get('Type', ''):
-                            target = rel.attrib.get('Target')
-                            target_name = os.path.basename(target)
-                            target_drawing = f"xl/drawings/{target_name}"
-                            break
+            try:
+                wb_xml = archive.read('xl/workbook.xml')
+                wb_root = ET.fromstring(wb_xml)
+                sheet_rid = None
+                for sheet in wb_root.iter():
+                    if sheet.tag.endswith('sheet'):
+                        for k, v in sheet.attrib.items():
+                            if k.endswith('id'):
+                                sheet_rid = v
+                                break
+                        break 
 
-            # Bắt đầu quét file Drawing đã bị cô lập
+                sheet_path = None
+                if sheet_rid:
+                    rels_xml = archive.read('xl/_rels/workbook.xml.rels')
+                    rels_root = ET.fromstring(rels_xml)
+                    for rel in rels_root.iter():
+                        if rel.attrib.get('Id') == sheet_rid:
+                            sheet_path = rel.attrib.get('Target')
+                            break
+                            
+                if sheet_path:
+                    sheet_name = os.path.basename(sheet_path)
+                    sheet_dir = os.path.dirname(sheet_path)
+                    if sheet_dir: sheet_dir = f"{sheet_dir}/"
+                    else: sheet_dir = ""
+                    
+                    sheet_rels_path = f"xl/{sheet_dir}_rels/{sheet_name}.rels"
+                    if sheet_rels_path in archive.namelist():
+                        sh_rels = ET.fromstring(archive.read(sheet_rels_path))
+                        for rel in sh_rels.iter():
+                            if 'drawing' in rel.attrib.get('Type', ''):
+                                target = rel.attrib.get('Target')
+                                target_name = os.path.basename(target)
+                                target_drawing = f"xl/drawings/{target_name}"
+                                break
+            except Exception:
+                pass
+
             drawings_list = [target_drawing] if target_drawing and target_drawing in archive.namelist() else [f for f in archive.namelist() if f.startswith('xl/drawings/') and f.endswith('.xml') and '_rels' not in f]
 
             for draw_file in drawings_list:
@@ -298,15 +294,16 @@ def tao_the_ca_nhan(data, img_info, chi_in_noi_dung, cfg, col_l1, col_l2, col_l3
     if img_info and os.path.exists(img_info['path']):
         try:
             anh_vdv = Image.open(img_info['path'])
+            # SỬA LỖI XOAY 180 ĐỘ: Loại bỏ hoàn toàn trích xuất exif dư thừa gây lộn ngược ảnh
             anh_vdv = ImageOps.exif_transpose(anh_vdv)
-            rot_val = img_info.get('rot', 0)
-            if rot_val != 0:
-                anh_vdv = anh_vdv.rotate(-(rot_val / 60000.0), expand=True)
             anh_vdv = anh_vdv.convert("RGBA")
+            
+            # Chỉ cho phép can thiệp xoay thủ công từ lưới ra-đa điều khiển
             if anh_vdv.width > anh_vdv.height:
                 rot_choice = st.session_state.get(f"radar_rot_{excel_row}", "➖ Giữ nguyên")
                 if "👈 Đầu Trái" in rot_choice: anh_vdv = anh_vdv.rotate(-90, expand=True)
                 elif "👉 Đầu Phải" in rot_choice: anh_vdv = anh_vdv.rotate(90, expand=True)
+                
             img_w, img_h = int(cfg['img_w']), int(cfg['img_h'])
             img_x, img_y = int(cfg['img_x']), int(cfg['img_y'])
             anh_vdv = ImageOps.fit(anh_vdv, (img_w, img_h), method=Image.Resampling.LANCZOS, centering=(0.5, 0.5))
@@ -466,6 +463,9 @@ else:
                     st.success("✅ Đã cập nhật phôi Thẻ Tạm thành công!")
                     st.rerun()
 
+    # =========================================================================
+    # MODULE: IN NHANH THẺ TẠM (CÓ TẢI ẢNH & CHỈNH TỌA ĐỘ)
+    # =========================================================================
     elif menu_selection == "⏳ In nhanh Thẻ Tạm":
         st.title("⏳ IN NHANH THẺ TẠM THỜI & KHÁCH MỜI")
         st.info("💡 Nhập thông tin Khách mời/Trọng tài, tải ảnh chân dung lên và tùy chỉnh mọi thứ y như làm thẻ từ Excel.")
@@ -597,6 +597,9 @@ else:
                 ten_file_an_toan = bo_dau_tieng_viet(t_tenfile).replace(" ", "_") + ".pdf"
                 st.download_button(label="🖨️ TẢI FILE PDF BẢN IN NÀY NGAY", data=pdf_bytes, file_name=ten_file_an_toan, mime="application/pdf", use_container_width=True)
 
+    # =========================================================================
+    # MODULE: TẠO THẺ THI ĐẤU TỪ EXCEL
+    # =========================================================================
     elif menu_selection == "➕ Tạo thẻ thi đấu":
         st.title("➕ TẠO THẺ THI ĐẤU & DÀN TRANG IN")
         
@@ -769,7 +772,6 @@ else:
             df = df.dropna(subset=[col_id])
             df = df.ffill()
 
-            # --- THUẬT TOÁN MA TRẬN XÓA BÓNG MA ---
             if ban_do_anh:
                 phobien_col = Counter([img['col'] for img in ban_do_anh]).most_common(1)[0][0]
                 valid_images_raw = [img for img in ban_do_anh if img['col'] == phobien_col]
