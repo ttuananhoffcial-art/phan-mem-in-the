@@ -270,7 +270,7 @@ def tao_the_ca_nhan(data, img_info, chi_in_noi_dung, cfg, col_l1, col_l2, col_l3
     all_vals = [str(val) for val in data.tolist() if pd.notna(val)]
     all_text_clean = " ".join([bo_dau_tieng_viet(val) for val in all_vals])
     
-    chuc_vu_vip = ["HLV", "HUAN LUYEN VIEN", "TRONG TAI", "BTC", "TRUONG DOAN", "BAN TO CHUC", "THU KY"]
+    chuc_vu_vip = ["HLV", "HUAN LUYEN VIEN", "TRONG TAI", "BTC", "TRUONG DOAN", "BAN TO CHUC", "THU KY", "ORGANIZER"]
     chuc_vu_tam = ["TAM THOI", "KHACH MOI", "BAO CHI", "TINH NGUYEN", "VIP", "DAI BIEU", "TNV"]
     
     is_hlv = any(kw in all_text_clean for kw in chuc_vu_vip)
@@ -294,11 +294,9 @@ def tao_the_ca_nhan(data, img_info, chi_in_noi_dung, cfg, col_l1, col_l2, col_l3
     if img_info and os.path.exists(img_info['path']):
         try:
             anh_vdv = Image.open(img_info['path'])
-            # SỬA LỖI XOAY 180 ĐỘ: Loại bỏ hoàn toàn trích xuất exif dư thừa gây lộn ngược ảnh
             anh_vdv = ImageOps.exif_transpose(anh_vdv)
             anh_vdv = anh_vdv.convert("RGBA")
             
-            # Chỉ cho phép can thiệp xoay thủ công từ lưới ra-đa điều khiển
             if anh_vdv.width > anh_vdv.height:
                 rot_choice = st.session_state.get(f"radar_rot_{excel_row}", "➖ Giữ nguyên")
                 if "👈 Đầu Trái" in rot_choice: anh_vdv = anh_vdv.rotate(-90, expand=True)
@@ -463,9 +461,6 @@ else:
                     st.success("✅ Đã cập nhật phôi Thẻ Tạm thành công!")
                     st.rerun()
 
-    # =========================================================================
-    # MODULE: IN NHANH THẺ TẠM (CÓ TẢI ẢNH & CHỈNH TỌA ĐỘ)
-    # =========================================================================
     elif menu_selection == "⏳ In nhanh Thẻ Tạm":
         st.title("⏳ IN NHANH THẺ TẠM THỜI & KHÁCH MỜI")
         st.info("💡 Nhập thông tin Khách mời/Trọng tài, tải ảnh chân dung lên và tùy chỉnh mọi thứ y như làm thẻ từ Excel.")
@@ -597,9 +592,6 @@ else:
                 ten_file_an_toan = bo_dau_tieng_viet(t_tenfile).replace(" ", "_") + ".pdf"
                 st.download_button(label="🖨️ TẢI FILE PDF BẢN IN NÀY NGAY", data=pdf_bytes, file_name=ten_file_an_toan, mime="application/pdf", use_container_width=True)
 
-    # =========================================================================
-    # MODULE: TẠO THẺ THI ĐẤU TỪ EXCEL
-    # =========================================================================
     elif menu_selection == "➕ Tạo thẻ thi đấu":
         st.title("➕ TẠO THẺ THI ĐẤU & DÀN TRANG IN")
         
@@ -746,6 +738,12 @@ else:
                 else: clean_cols.append(c_str)
             df_cols.columns = clean_cols
             
+            # BỘ LỌC CHỐNG LỖI INDEX ERROR KHI FILE EXCEL RỖNG
+            if len(df_cols.columns) == 0:
+                st.warning("🚨 MÀN HÌNH X-QUANG TRỐNG RỖNG! Không tìm thấy cột dữ liệu nào.")
+                st.info("💡 Lỗi này thường do 2 nguyên nhân:\n- Bạn nhập sai **'Dòng chứa Tiêu đề cột'** (Dòng 4 không có chữ).\n- Dữ liệu của bạn nằm ở **Sheet khác** (Phần mềm mặc định bốc dữ liệu ở Sheet đầu tiên bên trái). Hãy mở Excel lên, kéo Sheet chứa dữ liệu ra ngoài cùng bên trái rồi lưu lại nhé!")
+                st.stop()
+            
             st.markdown("👁️ **Màn hình X-Quang: Đây là những cột máy tính đọc được:**")
             st.dataframe(df_cols.head(2), use_container_width=True)
 
@@ -773,14 +771,20 @@ else:
             df = df.ffill()
 
             if ban_do_anh:
-                phobien_col = Counter([img['col'] for img in ban_do_anh]).most_common(1)[0][0]
-                valid_images_raw = [img for img in ban_do_anh if img['col'] == phobien_col]
-                
-                dict_images = {}
-                for img in valid_images_raw:
-                    dict_images[img['row']] = img 
-                    
-                valid_images = list(dict_images.values())
+                valid_images = []
+                for img in ban_do_anh:
+                    da_co = False
+                    for v_img in valid_images:
+                        if v_img['row'] == img['row']:
+                            da_co = True
+                            if img['col'] > v_img['col']:
+                                v_img['col'] = img['col']
+                                v_img['path'] = img['path']
+                                v_img['rot'] = img['rot']
+                            break
+                    if not da_co:
+                        valid_images.append(img.copy())
+                        
                 for img in valid_images: img['used'] = False
             else: 
                 valid_images = []
@@ -801,7 +805,7 @@ else:
             for p in persons:
                 if p['img_info'] is None:
                     for img in valid_images:
-                        if not img.get('used') and abs(img['row'] - p['xml_row']) <= 1: 
+                        if not img.get('used') and abs(img['row'] - p['xml_row']) <= 2: 
                             p['img_info'] = img
                             img['used'] = True
                             break
