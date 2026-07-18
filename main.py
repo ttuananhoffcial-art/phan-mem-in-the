@@ -92,7 +92,7 @@ def save_config(cfg):
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f: json.dump(cfg, f, ensure_ascii=False, indent=4)
     except Exception as e: pass
 
-# --- CỖ MÁY BÓC TÁCH ẢNH THẾ HỆ MỚI (CHỈ ĐỌC ĐÚNG SHEET ĐƯỢC CHỌN) ---
+# --- BỘ MÁY BÓC TÁCH ẢNH HOÀN THIỆN ---
 def extract_images_from_excel(file_buffer, target_sheet_name):
     img_dir = os.path.join(OUTPUT_DIR, "extracted_images")
     os.makedirs(img_dir, exist_ok=True)
@@ -105,10 +105,8 @@ def extract_images_from_excel(file_buffer, target_sheet_name):
             for sheet in wb_root.iter():
                 if sheet.tag.endswith('sheet'):
                     if sheet.attrib.get('name') == target_sheet_name:
-                        for k, v in sheet.attrib.items():
-                            if k.endswith('id'):
-                                sheet_rid = v
-                                break
+                        # CHUẨN XÁC: Phải lấy mã r:id thì mới không bị lỗi Sheet
+                        sheet_rid = sheet.attrib.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id')
                         break 
 
             sheet_path = None
@@ -131,7 +129,7 @@ def extract_images_from_excel(file_buffer, target_sheet_name):
                 if sheet_rels_path in archive.namelist():
                     sh_rels = ET.fromstring(archive.read(sheet_rels_path))
                     for rel in sh_rels.iter():
-                        if 'drawing' in rel.attrib.get('Type', ''):
+                        if 'drawing' in str(rel.attrib.get('Type', '')):
                             target = rel.attrib.get('Target')
                             target_name = os.path.basename(target)
                             target_drawing = f"xl/drawings/{target_name}"
@@ -241,6 +239,7 @@ def xu_ly_text_in_the(text, case_type="Viết hoa toàn bộ"):
     
     txt_lower = text.lower()
     
+    # BỔ SUNG TỪ ĐIỂN SONG NGỮ
     mapping = {
         "hlv": "Huấn Luyện Viên", 
         "vdv": "Vận Động Viên", 
@@ -715,7 +714,6 @@ else:
         if file_excel is not None:
             file_bytes = file_excel.getvalue()
             
-            # --- CẢI TIẾN: CHO PHÉP NGƯỜI DÙNG CHỌN SHEET ---
             try:
                 xls = pd.ExcelFile(io.BytesIO(file_bytes), engine='openpyxl')
                 danh_sach_sheet = xls.sheet_names
@@ -728,15 +726,13 @@ else:
             with col_s2:
                 header_row = st.number_input("⚙️ Dòng chứa Tiêu đề cột:", min_value=1, value=4, step=1)
                 
-            # ĐÃ XÓA CACHE ST.SESSION_STATE ĐỂ ÉP ĐỌC FILE LẠI MỖI KHI ĐỔI SHEET
             with st.spinner("⏳ Đang xử lý dữ liệu và bóc tách ảnh..."):
                 header_idx = int(header_row) - 1
                 try:
                     df_raw = pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet_chon, header=header_idx, engine='openpyxl')
                 except Exception as e:
-                    df_raw = pd.DataFrame() # Ép rỗng nếu lỗi
+                    df_raw = pd.DataFrame() 
 
-                # Bóc ảnh riêng cho Sheet đã chọn
                 ban_do_anh = extract_images_from_excel(io.BytesIO(file_bytes), sheet_chon)
             
             df_cols = df_raw.copy()
@@ -748,10 +744,9 @@ else:
                 else: clean_cols.append(c_str)
             df_cols.columns = clean_cols
             
-            # --- HỆ THỐNG CẢNH BÁO THÔNG MINH ---
             if len(df_cols.columns) == 0:
                 st.warning("🚨 MÀN HÌNH X-QUANG TRỐNG RỖNG! Không tìm thấy dữ liệu nào.")
-                st.info("💡 Lỗi này thường do **'Dòng Tiêu đề'** bạn chọn nằm ở một hàng trắng (không có chữ) trong Excel. Hãy mở file ra đếm lại hoặc thử chỉnh thông số ở dòng trên nhé!")
+                st.info("💡 Bạn hãy chắc chắn 'Dòng Tiêu đề cột' đã đúng hoặc kiểm tra lại file Excel nhé!")
                 st.stop()
                 
             st.markdown("👁️ **Màn hình X-Quang: Đây là những cột máy tính đọc được:**")
@@ -762,10 +757,10 @@ else:
             def_l1, def_l2, def_l3, def_l4 = 0, 0, 0, 0
             for i, col in enumerate(cols_list):
                 c_low = chuan_hoa_chu(col).lower()
-                if "tên" in c_low or "ten" in c_low: def_l1 = i
-                if "chức vụ" in c_low or "chuc vu" in c_low: def_l2 = i
-                if "sinh" in c_low or "năm" in c_low: def_l3 = i
-                if "đơn vị" in c_low or "don vi" in c_low or "clb" in c_low or "đv" in c_low: def_l4 = i
+                if "tên" in c_low or "ten" in c_low or "name" in c_low: def_l1 = i
+                if "chức vụ" in c_low or "chuc vu" in c_low or "position" in c_low or "role" in c_low: def_l2 = i
+                if "sinh" in c_low or "năm" in c_low or "dob" in c_low or "birth" in c_low: def_l3 = i
+                if "đơn vị" in c_low or "don vi" in c_low or "clb" in c_low or "đv" in c_low or "company" in c_low or "team" in c_low: def_l4 = i
 
             st.markdown("### 📋 5. Ghép Cột Dữ Liệu Tùy Biến:")
             col_a, col_b, col_c, col_d = st.columns(4)
@@ -774,20 +769,32 @@ else:
             col_l3 = col_c.selectbox("Dòng 3 in cột:", cols_list, index=def_l3)
             col_l4 = col_d.selectbox("Dòng 4 in cột:", cols_list, index=def_l4)
 
-            col_id = col_l1 if col_l1 != "--- Không in ---" else df_cols.columns[0]
+            # --- KIỂM SOÁT DANH SÁCH RỖNG BẢO MẬT ---
+            col_thuc_te = []
+            if col_l1 != "--- Không in ---": col_thuc_te.append(col_l1)
+            if col_l2 != "--- Không in ---": col_thuc_te.append(col_l2)
+            if col_l3 != "--- Không in ---": col_thuc_te.append(col_l3)
+            if col_l4 != "--- Không in ---": col_thuc_te.append(col_l4)
+
+            if len(col_thuc_te) == 0:
+                st.error("⚠️ Bạn đang để trống toàn bộ Dòng 1, Dòng 2, Dòng 3, Dòng 4. Vui lòng chọn ít nhất một cột dữ liệu để phần mềm biết cần in ai nhé!")
+                st.stop()
+            else:
+                col_id = col_thuc_te[0]
             
             df = df_cols.copy()
             df = df.dropna(subset=[col_id])
             df = df.ffill()
 
             if ban_do_anh:
-                ban_do_anh.sort(key=lambda x: x['col'], reverse=True)
+                # TÌM CỘT CHỨA NHIỀU ẢNH NHẤT (Khóa mục tiêu vào cột ảnh chân dung, bỏ qua logo rác)
+                phobien_col = Counter([img['col'] for img in ban_do_anh]).most_common(1)[0][0]
+                valid_images_raw = [img for img in ban_do_anh if img['col'] == phobien_col]
                 
                 dict_images = {}
-                for img in ban_do_anh:
-                    if img['row'] not in dict_images:
-                        dict_images[img['row']] = img 
-                        
+                for img in valid_images_raw:
+                    dict_images[img['row']] = img 
+                    
                 valid_images = list(dict_images.values())
                 for img in valid_images: img['used'] = False
             else: 
