@@ -92,15 +92,17 @@ def save_config(cfg):
     except Exception as e: pass
 
 # =========================================================
-# LÕI QUÉT ẢNH V5: TỪ TÍNH XUYÊN THẤU VÀ TỰ ĐỘNG LỌC LOGO
+# LÕI QUÉT ẢNH V6: SỬA LỖI MẤT BỘ ĐỆM (MỞ ZIP 1 LẦN DUY NHẤT)
 # =========================================================
 def extract_images_from_excel(file_buffer, target_sheet_name):
     img_dir = os.path.join(OUTPUT_DIR, "extracted_images")
     os.makedirs(img_dir, exist_ok=True)
     images_info = []
+    
     try:
         with zipfile.ZipFile(file_buffer, 'r') as archive:
             # 1. Tìm id của Sheet an toàn (Không quan tâm Hoa/Thường)
+            target_drawing = None
             wb_name = next((f for f in archive.namelist() if f.lower() == 'xl/workbook.xml'), None)
             sheet_rid = None
             if wb_name:
@@ -111,43 +113,35 @@ def extract_images_from_excel(file_buffer, target_sheet_name):
                             if k.endswith('id'): sheet_rid = v
                         break 
 
-            # 2. Tìm file XML chứa kết cấu Sheet
-            sheet_path = None
+            # 2. Lần ra file Drawing chứa ảnh của Sheet đó
             if sheet_rid:
                 rels_name = next((f for f in archive.namelist() if f.lower() == 'xl/_rels/workbook.xml.rels'), None)
                 if rels_name:
                     rels_root = ET.fromstring(archive.read(rels_name))
+                    sheet_target = None
                     for rel in rels_root.iter():
                         if rel.attrib.get('Id') == sheet_rid:
-                            sheet_path = rel.attrib.get('Target')
+                            sheet_target = rel.attrib.get('Target')
                             break
                             
-            # 3. Lần ra file Drawing chứa ảnh của Sheet đó
-            target_drawing = None
-            if sheet_path:
-                if sheet_path.startswith('/xl/'): sheet_path = sheet_path[4:]
-                elif sheet_path.startswith('xl/'): sheet_path = sheet_path[3:]
-                
-                sheet_name = os.path.basename(sheet_path)
-                sheet_dir = os.path.dirname(sheet_path)
-                if sheet_dir: sheet_dir = f"{sheet_dir}/"
-                else: sheet_dir = ""
-                
-                sheet_rels_path = f"xl/{sheet_dir}_rels/{sheet_name}.rels"
-                actual_rels_path = next((f for f in archive.namelist() if f.lower() == sheet_rels_path.lower()), None)
-                if actual_rels_path:
-                    sh_rels = ET.fromstring(archive.read(actual_rels_path))
-                    for rel in sh_rels.iter():
-                        if 'drawing' in str(rel.attrib.get('Type', '')).lower():
-                            target = rel.attrib.get('Target')
-                            target_name = os.path.basename(target)
-                            target_drawing = next((f for f in archive.namelist() if f.lower().endswith(f'/drawings/{target_name}'.lower())), None)
-                            break
-    except Exception: pass
+                    if sheet_target:
+                        if sheet_target.startswith('/xl/'): sheet_target = sheet_target[4:]
+                        elif sheet_target.startswith('xl/'): sheet_target = sheet_target[3:]
+                        
+                        sheet_dir = os.path.dirname(sheet_target)
+                        sheet_base = os.path.basename(sheet_target)
+                        rel_path = f"xl/{sheet_dir}/_rels/{sheet_base}.rels".replace('//', '/')
+                        actual_rels_path = next((f for f in archive.namelist() if f.lower() == rel_path.lower()), None)
+                        
+                        if actual_rels_path:
+                            sh_rels = ET.fromstring(archive.read(actual_rels_path))
+                            for rel in sh_rels.iter():
+                                if 'drawing' in str(rel.attrib.get('Type', '')).lower():
+                                    dt_target = os.path.basename(rel.attrib.get('Target'))
+                                    target_drawing = next((f for f in archive.namelist() if f.lower().endswith(f'/drawings/{dt_target}'.lower())), None)
+                                    break
 
-    # BẮT ĐẦU BÓC TÁCH TOÀN BỘ ẢNH
-    try:
-        with zipfile.ZipFile(file_buffer, 'r') as archive:
+            # 3. Tiến hành trích xuất ảnh NGAY TRONG LẦN MỞ FILE NÀY
             drawings_list = [target_drawing] if target_drawing else [f for f in archive.namelist() if f.lower().startswith('xl/drawings/') and f.lower().endswith('.xml') and '_rels' not in f.lower()]
 
             for draw_file in drawings_list:
@@ -167,7 +161,6 @@ def extract_images_from_excel(file_buffer, target_sheet_name):
                     content = archive.read(draw_file)
                     root = ET.fromstring(content)
                     
-                    # Dùng không gian tên chuẩn để lục soát
                     namespaces = {'xdr': 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing'}
                     for anchor_type in ['.//xdr:twoCellAnchor', './/xdr:oneCellAnchor']:
                         for anchor in root.findall(anchor_type, namespaces):
@@ -193,7 +186,6 @@ def extract_images_from_excel(file_buffer, target_sheet_name):
                                         
                                         if rId and rId in image_map:
                                             img_name = image_map[rId]
-                                            # Vớt chính xác file trong kho Zip
                                             img_path_in_zip = next((f for f in archive.namelist() if os.path.basename(f) == img_name), None)
                                             
                                             if img_path_in_zip:
@@ -804,9 +796,7 @@ else:
             df = df.dropna(subset=[col_id])
             df = df.ffill()
 
-            # --- THUẬT TOÁN "NAM CHÂM XUYÊN THẤU" (V5) ---
             if ban_do_anh:
-                # Ưu tiên cột phải (col lớn) để lấy ảnh chân dung, né Logo giải đấu bên mép trái
                 ban_do_anh.sort(key=lambda x: (-x['col'], x['row']))
                 for img in ban_do_anh: img['used'] = False
             else: 
@@ -818,17 +808,14 @@ else:
                 current_excel_row = current_xml_row + 1
                 persons.append({'row_data': row, 'xml_row': current_xml_row, 'excel_row': current_excel_row, 'img_info': None})
 
-            # Lực hút Nam Châm
             for p in persons:
                 best_img = None
                 
-                # Quét vòng 1: Tìm ảnh khớp 100% đúng dòng
                 for img in ban_do_anh:
                     if not img.get('used') and abs(img['row'] - p['xml_row']) == 0:
                         best_img = img
                         break
                         
-                # Quét vòng 2: Nếu chưa có ảnh, vớt các ảnh bị dán lệch 1-2 dòng
                 if not best_img:
                     for img in ban_do_anh:
                         if not img.get('used') and abs(img['row'] - p['xml_row']) <= 2:
