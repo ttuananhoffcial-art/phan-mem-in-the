@@ -11,6 +11,8 @@ import json
 import re
 import datetime
 import unicodedata 
+import shutil
+import gc
 from collections import Counter
 from reportlab.lib.pagesizes import A4
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Image as RLImage
@@ -36,6 +38,19 @@ hide_st_style = """
             </style>
             """
 st.markdown(hide_st_style, unsafe_allow_html=True)
+
+def don_dep_bo_nho_tam():
+    try:
+        for filename in os.listdir(OUTPUT_DIR):
+            file_path = os.path.join(OUTPUT_DIR, filename)
+            if os.path.isfile(file_path):
+                os.remove(file_path)
+            elif os.path.isdir(file_path):
+                shutil.rmtree(file_path)
+        os.makedirs(os.path.join(OUTPUT_DIR, "extracted_images"), exist_ok=True)
+        gc.collect() 
+    except Exception as e:
+        pass
 
 def bo_dau_tieng_viet(text):
     if pd.isna(text): return ""
@@ -91,9 +106,6 @@ def save_config(cfg):
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f: json.dump(cfg, f, ensure_ascii=False, indent=4)
     except Exception as e: pass
 
-# =========================================================
-# LÕI QUÉT ẢNH V7: CHUẨN OOXML & CHỐNG CƯỚP ẢNH ĐA TẦNG
-# =========================================================
 def extract_images_from_excel(file_buffer, target_sheet_name):
     img_dir = os.path.join(OUTPUT_DIR, "extracted_images")
     os.makedirs(img_dir, exist_ok=True)
@@ -109,7 +121,6 @@ def extract_images_from_excel(file_buffer, target_sheet_name):
                 if actual_path: return ET.fromstring(archive.read(actual_path))
                 return None
 
-            # BƯỚC 1: Tìm ID của Sheet
             wb_root = read_xml('xl/workbook.xml')
             sheet_rId = None
             if wb_root is not None:
@@ -119,7 +130,6 @@ def extract_images_from_excel(file_buffer, target_sheet_name):
                             if k.endswith('id'): sheet_rId = v
                         break
 
-            # BƯỚC 2: Tìm đường dẫn file XML của Sheet đó
             sheet_xml_path = None
             if sheet_rId:
                 wb_rels_root = read_xml('xl/_rels/workbook.xml.rels')
@@ -129,7 +139,6 @@ def extract_images_from_excel(file_buffer, target_sheet_name):
                             sheet_xml_path = rel.attrib.get('Target')
                             break
 
-            # BƯỚC 3: Mở file Sheet XML ra để tìm Drawing ID
             drawing_rId = None
             if sheet_xml_path:
                 if sheet_xml_path.startswith('/xl/'): sheet_xml_path = sheet_xml_path[4:]
@@ -143,7 +152,6 @@ def extract_images_from_excel(file_buffer, target_sheet_name):
                                 if k.endswith('id'): drawing_rId = v
                             break
 
-            # BƯỚC 4: Tìm đường dẫn file Drawing XML
             target_drawing_xml = None
             if drawing_rId and sheet_xml_path:
                 sheet_dir = os.path.dirname(sheet_xml_path)
@@ -159,7 +167,6 @@ def extract_images_from_excel(file_buffer, target_sheet_name):
                             else: target_drawing_xml = f"xl/{sheet_dir}/{dw_target}"
                             break
 
-            # BƯỚC 5: Đọc file Drawing XML và bốc ảnh (CÓ DỰ PHÒNG FALLBACK)
             drawings_to_scan = [target_drawing_xml] if target_drawing_xml else [f for f in namelist if f.lower().startswith('xl/drawings/') and f.lower().endswith('.xml') and '_rels' not in f.lower()]
 
             for drawing_actual_path in drawings_to_scan:
@@ -324,7 +331,7 @@ def tao_the_ca_nhan(data, img_info, chi_in_noi_dung, cfg, col_l1, col_l2, col_l3
         phoi_w, phoi_h = 1000, 1400
         phoi_goc = Image.new("RGBA", (phoi_w, phoi_h), (255, 255, 255, 255))
         
-    card = Image.new("RGBA", (phoi_w, phoi_h), (255, 255, 255, 255)) if chi_in_noi_dung else phoi_goc
+    card = Image.new("RGBA", (phoi_w, phoi_h), (255, 255, 255, 255)) if chi_in_noi_dung else phoi_goc.copy()
     draw = ImageDraw.Draw(card)
     
     if img_info and os.path.exists(img_info['path']):
@@ -525,6 +532,10 @@ else:
             t_width = col_w.number_input("Chiều ngang PDF (cm):", value=10.0, step=0.1, key="tam_w")
             t_height = col_h.number_input("Chiều cao PDF (cm):", value=14.0, step=0.1, key="tam_h")
             
+            # CẬP NHẬT TÙY CHỌN: CHỐNG MẤT VIỀN
+            kieu_xuat_tam_list = ["📄 1 thẻ giữa trang A4 (Chống mất viền)", "💳 1 thẻ chuẩn kích thước (Máy in PVC)"]
+            kieu_xuat_tam = st.radio("Định dạng file PDF:", kieu_xuat_tam_list)
+            
             t_tenfile = st.text_input("🖨️ Tên file PDF khi tải về:", value=f"The_Tam_{t_ten.replace(' ', '')}" if t_ten else "The_Khach_Moi", key="tam_file")
 
         st.markdown("---")
@@ -618,10 +629,19 @@ else:
                     st.image(path_tam, use_container_width=True, caption="Bản xem trước thẻ")
 
                 pdf_buffer = io.BytesIO()
-                c = canvas.Canvas(pdf_buffer, pagesize=(t_width*cm, t_height*cm))
-                c.drawImage(path_tam, 0, 0, width=t_width*cm, height=t_height*cm)
-                c.showPage()
-                c.save()
+                
+                # CẬP NHẬT: XUẤT FILE 1 THẺ CHỐNG MẤT VIỀN
+                if "giữa trang A4" in kieu_xuat_tam:
+                    doc = SimpleDocTemplate(pdf_buffer, pagesize=A4, leftMargin=0, rightMargin=0, topMargin=0, bottomMargin=0)
+                    img = RLImage(path_tam, width=t_width*cm, height=t_height*cm)
+                    table = Table([[img]], colWidths=[21*cm], rowHeights=[29.7*cm])
+                    table.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'CENTER'), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')]))
+                    doc.build([table])
+                else:
+                    c = canvas.Canvas(pdf_buffer, pagesize=(t_width*cm, t_height*cm))
+                    c.drawImage(path_tam, 0, 0, width=t_width*cm, height=t_height*cm)
+                    c.showPage()
+                    c.save()
 
                 pdf_bytes = pdf_buffer.getvalue()
                 
@@ -644,8 +664,12 @@ else:
         the_width_cm = st.sidebar.number_input("Chiều ngang thẻ (cm):", value=float(cfg.get('the_width_cm', 10.0)), step=0.1)
         the_height_cm = st.sidebar.number_input("Chiều cao thẻ (cm):", value=float(cfg.get('the_height_cm', 14.0)), step=0.1)
         
-        kieu_xuat_list = ["🔲 4 thẻ / 1 trang A4", "📄 1 thẻ / 1 trang"]
-        kieu_idx = kieu_xuat_list.index(cfg.get('kieu_xuat_file', kieu_xuat_list[0])) if cfg.get('kieu_xuat_file') in kieu_xuat_list else 0
+        # CẬP NHẬT TÙY CHỌN: CHỐNG MẤT VIỀN CĂN GIỮA
+        kieu_xuat_list = ["🔲 4 thẻ / 1 trang A4", "📄 1 thẻ giữa trang A4 (Chống mất viền)", "💳 1 thẻ chuẩn kích thước (Máy in PVC)"]
+        kieu_idx = 0
+        if cfg.get('kieu_xuat_file') in kieu_xuat_list:
+            kieu_idx = kieu_xuat_list.index(cfg.get('kieu_xuat_file'))
+            
         kieu_xuat_file = st.sidebar.radio("Chọn bố cục file PDF:", kieu_xuat_list, index=kieu_idx)
         
         nen_list = ["🖼️ In đầy đủ (Cả nền Xanh/Hồng)", "⬜ Chỉ in nội dung (Nền trắng)"]
@@ -750,6 +774,7 @@ else:
         
         if file_excel is not None:
             file_bytes = file_excel.getvalue()
+            don_dep_bo_nho_tam() 
             
             try:
                 xls = pd.ExcelFile(io.BytesIO(file_bytes), engine='openpyxl')
@@ -763,17 +788,24 @@ else:
             with col_s2:
                 header_row = st.number_input("⚙️ Dòng chứa Tiêu đề cột:", min_value=1, value=4, step=1)
                 
-            # ĐÃ GỠ BỎ HOÀN TOÀN BỘ NHỚ ĐỆM (CACHE) KHỎI PHẦN NÀY ĐỂ BẮT ĐỌC TỪ ĐẦU
-            with st.spinner("⏳ Đang xử lý dữ liệu và bóc tách ảnh..."):
-                header_idx = int(header_row) - 1
-                try:
-                    df_raw = pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet_chon, header=header_idx, engine='openpyxl')
-                except Exception as e:
-                    df_raw = pd.DataFrame() 
-
-                ban_do_anh = extract_images_from_excel(io.BytesIO(file_bytes), sheet_chon)
+            file_id = f"{file_excel.name}_{file_excel.size}_{header_row}_{sheet_chon}"
             
-            df_cols = df_raw.copy()
+            if st.session_state.get('current_file_id') != file_id:
+                st.session_state['current_file_id'] = file_id
+                with st.spinner("⏳ Đang xử lý dữ liệu và bóc tách ảnh..."):
+                    header_idx = int(header_row) - 1
+                    try:
+                        df_raw = pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet_chon, header=header_idx, engine='openpyxl')
+                    except Exception as e:
+                        df_raw = pd.DataFrame() 
+
+                    ban_do_anh = extract_images_from_excel(io.BytesIO(file_bytes), sheet_chon)
+                    
+                    st.session_state['raw_df'] = df_raw
+                    st.session_state['ban_do_anh'] = ban_do_anh
+            
+            df_cols = st.session_state['raw_df'].copy()
+            ban_do_anh = st.session_state['ban_do_anh'].copy()
             
             clean_cols = []
             for i, c in enumerate(df_cols.columns):
@@ -823,7 +855,6 @@ else:
             df = df.dropna(subset=[col_id])
             df = df.ffill()
 
-            # BỘ LỌC ĐA TẦNG (MULTI-PASS) CHỐNG CƯỚP ẢNH
             if ban_do_anh:
                 dict_images = {}
                 for img in ban_do_anh:
@@ -839,7 +870,6 @@ else:
                 current_excel_row = current_xml_row + 1
                 persons.append({'row_data': row, 'xml_row': current_xml_row, 'excel_row': current_excel_row, 'img_info': None})
 
-            # QUÉT VÒNG LẶP: Ai gần nhất được gán trước, không cướp của người khác
             for dist_allowed in [0, 1, 2]:
                 for p in persons:
                     if p['img_info'] is None:
@@ -945,9 +975,22 @@ else:
                                 table.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'CENTER'), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')]))
                                 story.append(table)
                                 doc.build(story)
-                            else:
-                                st.info(f"💡 Kích thước xuất PDF: {the_width_cm}cm x {the_height_cm}cm mỗi trang.")
+                            elif "giữa trang A4" in kieu_xuat_file:
+                                st.info(f"💡 Thẻ sẽ được đặt chính giữa trang A4 để in trên các máy in văn phòng mà không bị lẹm lề/mất viền.")
                                 for i, p in enumerate(danh_sach_duong_dan_the): st.image(p, caption=f"Thẻ số {i+1}", use_container_width=True)
+                                
+                                doc = SimpleDocTemplate(pdf_buffer, pagesize=A4, leftMargin=0, rightMargin=0, topMargin=0, bottomMargin=0)
+                                story = []
+                                for path_the in danh_sach_duong_dan_the:
+                                    img = RLImage(path_the, width=the_width_cm*cm, height=the_height_cm*cm)
+                                    table = Table([[img]], colWidths=[21*cm], rowHeights=[29.7*cm])
+                                    table.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'CENTER'), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')]))
+                                    story.append(table)
+                                doc.build(story)
+                            else:
+                                st.info(f"💡 Kích thước xuất PDF: {the_width_cm}cm x {the_height_cm}cm. Chuyên dùng cho máy in thẻ nhựa.")
+                                for i, p in enumerate(danh_sach_duong_dan_the): st.image(p, caption=f"Thẻ số {i+1}", use_container_width=True)
+                                
                                 c = canvas.Canvas(pdf_buffer, pagesize=(the_width_cm*cm, the_height_cm*cm))
                                 for path_the in danh_sach_duong_dan_the: c.drawImage(path_the, 0, 0, width=the_width_cm*cm, height=the_height_cm*cm); c.showPage()
                                 c.save()
