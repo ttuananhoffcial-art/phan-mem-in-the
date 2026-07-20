@@ -106,6 +106,9 @@ def save_config(cfg):
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f: json.dump(cfg, f, ensure_ascii=False, indent=4)
     except Exception as e: pass
 
+# =========================================================
+# LÕI QUÉT OMNI-SCANNER: VÉT CẠN MỌI FILE ẢNH TRONG EXCEL
+# =========================================================
 def extract_images_from_excel(file_buffer, target_sheet_name):
     img_dir = os.path.join(OUTPUT_DIR, "extracted_images")
     os.makedirs(img_dir, exist_ok=True)
@@ -116,115 +119,117 @@ def extract_images_from_excel(file_buffer, target_sheet_name):
             namelist = archive.namelist()
             namelist_lower = {f.lower(): f for f in namelist}
 
-            def read_xml(path):
-                actual_path = namelist_lower.get(path.lower())
+            def read_xml(path_guess):
+                actual_path = namelist_lower.get(path_guess.lower())
                 if actual_path: return ET.fromstring(archive.read(actual_path))
                 return None
 
-            wb_root = read_xml('xl/workbook.xml')
-            sheet_rId = None
-            if wb_root is not None:
-                for sheet in wb_root.iter():
-                    if sheet.tag.endswith('sheet') and sheet.attrib.get('name', '').strip() == target_sheet_name.strip():
-                        for k, v in sheet.attrib.items():
-                            if k.endswith('id'): sheet_rId = v
-                        break
-
-            sheet_xml_path = None
-            if sheet_rId:
-                wb_rels_root = read_xml('xl/_rels/workbook.xml.rels')
-                if wb_rels_root is not None:
-                    for rel in wb_rels_root.iter():
-                        if rel.attrib.get('Id') == sheet_rId:
-                            sheet_xml_path = rel.attrib.get('Target')
+            # 1. Cố gắng tìm Drawing XML chuẩn của Sheet hiện tại
+            target_drawing_path = None
+            try:
+                wb_root = read_xml('xl/workbook.xml')
+                sheet_rid = None
+                if wb_root is not None:
+                    for sheet in wb_root.iter():
+                        if sheet.tag.endswith('sheet') and sheet.attrib.get('name', '').strip() == target_sheet_name.strip():
+                            for k, v in sheet.attrib.items():
+                                if k.endswith('id'): sheet_rid = v
                             break
 
-            drawing_rId = None
-            if sheet_xml_path:
-                if sheet_xml_path.startswith('/xl/'): sheet_xml_path = sheet_xml_path[4:]
-                elif sheet_xml_path.startswith('xl/'): sheet_xml_path = sheet_xml_path[3:]
-                
-                sheet_root = read_xml(f'xl/{sheet_xml_path}')
-                if sheet_root is not None:
-                    for child in sheet_root.iter():
-                        if child.tag.endswith('drawing'):
-                            for k, v in child.attrib.items():
-                                if k.endswith('id'): drawing_rId = v
-                            break
-
-            target_drawing_xml = None
-            if drawing_rId and sheet_xml_path:
-                sheet_dir = os.path.dirname(sheet_xml_path)
-                sheet_basename = os.path.basename(sheet_xml_path)
-                sheet_rels_path = f"xl/{sheet_dir}/_rels/{sheet_basename}.rels".replace('//', '/')
-                
-                sheet_rels_root = read_xml(sheet_rels_path)
-                if sheet_rels_root is not None:
-                    for rel in sheet_rels_root.iter():
-                        if rel.attrib.get('Id') == drawing_rId:
-                            dw_target = rel.attrib.get('Target')
-                            if dw_target.startswith('../'): target_drawing_xml = f"xl/{dw_target[3:]}"
-                            else: target_drawing_xml = f"xl/{sheet_dir}/{dw_target}"
-                            break
-
-            drawings_to_scan = [target_drawing_xml] if target_drawing_xml else [f for f in namelist if f.lower().startswith('xl/drawings/') and f.lower().endswith('.xml') and '_rels' not in f.lower()]
-
-            for drawing_actual_path in drawings_to_scan:
-                if not drawing_actual_path: continue
-                drawing_root = read_xml(drawing_actual_path)
-                if drawing_root is None: continue
-                
-                drawing_dir = os.path.dirname(drawing_actual_path)
-                drawing_basename = os.path.basename(drawing_actual_path)
-                drawing_rels_path = f"{drawing_dir}/_rels/{drawing_basename}.rels".replace('//', '/')
-                
-                drawing_rels_root = read_xml(drawing_rels_path)
-                image_map = {} 
-                if drawing_rels_root is not None:
-                    for rel in drawing_rels_root.iter():
-                        if 'image' in str(rel.attrib.get('Type', '')).lower():
-                            rId = rel.attrib.get('Id')
-                            target = rel.attrib.get('Target') 
-                            if target.startswith('/'): image_map[rId] = target[1:]
-                            elif target.startswith('../'): image_map[rId] = f"xl/{target[3:]}"
-                            else: image_map[rId] = f"{drawing_dir}/{target}"
-
-                for anchor in drawing_root.iter():
-                    if anchor.tag.endswith('twoCellAnchor') or anchor.tag.endswith('oneCellAnchor'):
-                        row, col, rowOff = -1, -1, 0
-                        from_node = None
-                        for child in anchor.iter():
-                            if child.tag.endswith('from'):
-                                from_node = child
+                if sheet_rid:
+                    rels_root = read_xml('xl/_rels/workbook.xml.rels')
+                    sheet_xml_target = None
+                    if rels_root is not None:
+                        for rel in rels_root.iter():
+                            if rel.attrib.get('Id') == sheet_rid:
+                                sheet_xml_target = rel.attrib.get('Target')
                                 break
-                        if from_node is not None:
-                            for child in from_node.iter():
-                                if child.tag.endswith('row'): row = int(child.text)
-                                if child.tag.endswith('col'): col = int(child.text)
-                                if child.tag.endswith('rowOff'): rowOff = int(child.text)
 
-                        rot = 0
-                        img_rId = None
-                        for elem in anchor.iter():
-                            if elem.tag.endswith('xfrm'):
-                                rot_str = elem.attrib.get('rot')
-                                if rot_str:
-                                    try: rot = int(rot_str)
-                                    except: pass
-                            if elem.tag.endswith('blip'):
-                                for k, v in elem.attrib.items():
-                                    if k.endswith('embed'): img_rId = v
+                    if sheet_xml_target:
+                        sheet_basename = os.path.basename(sheet_xml_target)
+                        sheet_dir = os.path.dirname(sheet_xml_target)
+                        if sheet_dir.startswith('/'): sheet_dir = sheet_dir[1:]
+                        if sheet_dir and not sheet_dir.startswith('xl/'): sheet_dir = f"xl/{sheet_dir}"
+                        elif not sheet_dir: sheet_dir = "xl/worksheets"
 
-                        if img_rId and img_rId in image_map and row >= 0:
-                            media_path = image_map[img_rId]
-                            actual_media_path = namelist_lower.get(media_path.lower())
+                        sheet_rels_path = f"{sheet_dir}/_rels/{sheet_basename}.rels".replace('//', '/')
+                        sheet_rels_root = read_xml(sheet_rels_path)
 
-                            if actual_media_path:
-                                out_path = os.path.join(img_dir, f"img_{uuid.uuid4().hex}.png")
-                                with open(out_path, "wb") as f:
-                                    f.write(archive.read(actual_media_path))
-                                images_info.append({'row': row, 'col': col, 'rowOff': rowOff, 'path': out_path, 'rot': rot})
-    except Exception as e: pass
+                        if sheet_rels_root is not None:
+                            for rel in sheet_rels_root.iter():
+                                if 'drawing' in str(rel.attrib.get('Type', '')).lower():
+                                    dw_target = os.path.basename(rel.attrib.get('Target'))
+                                    target_drawing_path = next((f for f in namelist if f.lower().endswith(f'/drawings/{dw_target}'.lower())), None)
+                                    break
+            except Exception:
+                pass
+
+            # 2. XÁC ĐỊNH PHẠM VI QUÉT (Nếu tìm thấy chuẩn thì quét chuẩn, nếu đứt gãy thì QUÉT TOÀN BỘ)
+            if target_drawing_path:
+                drawings_to_scan = [target_drawing_path]
+            else:
+                drawings_to_scan = [f for f in namelist if '/drawings/drawing' in f.lower() and f.lower().endswith('.xml')]
+
+            # 3. TIẾN HÀNH BÓC TÁCH MÙ MỌI ĐƯỜNG DẪN
+            for draw_path in drawings_to_scan:
+                try:
+                    draw_dir = os.path.dirname(draw_path)
+                    draw_name = os.path.basename(draw_path)
+                    rels_guess = f"{draw_dir}/_rels/{draw_name}.rels"
+                    actual_rels_path = namelist_lower.get(rels_guess.lower())
+
+                    image_map = {}
+                    if actual_rels_path:
+                        rels_root = ET.fromstring(archive.read(actual_rels_path))
+                        for rel in rels_root.iter():
+                            if 'image' in str(rel.attrib.get('Type')).lower():
+                                rid = rel.attrib.get('Id')
+                                target = rel.attrib.get('Target')
+                                
+                                # TÍNH NĂNG VÉT CẠN: Bỏ qua đường dẫn ảo, chỉ lấy đúng Tên File Ảnh
+                                img_filename = os.path.basename(target)
+                                # Dùng tên file ảnh lục soát tung toàn bộ file Zip
+                                actual_media = next((f for f in namelist if os.path.basename(f).lower() == img_filename.lower()), None)
+                                if actual_media:
+                                    image_map[rid] = actual_media
+
+                    draw_root = ET.fromstring(archive.read(draw_path))
+                    for anchor in draw_root.iter():
+                        # Hỗ trợ cả 3 loại cấu trúc thả ảnh của Excel
+                        if anchor.tag.endswith('twoCellAnchor') or anchor.tag.endswith('oneCellAnchor') or anchor.tag.endswith('absoluteAnchor'):
+                            row, col, rowOff = -1, -1, 0
+                            from_node = next((c for c in anchor.iter() if c.tag.endswith('from')), None)
+                            if from_node is not None:
+                                row_node = next((c for c in from_node.iter() if c.tag.endswith('row')), None)
+                                col_node = next((c for c in from_node.iter() if c.tag.endswith('col')), None)
+                                rowOff_node = next((c for c in from_node.iter() if c.tag.endswith('rowOff')), None)
+
+                                if row_node is not None and row_node.text: row = int(row_node.text)
+                                if col_node is not None and col_node.text: col = int(col_node.text)
+                                if rowOff_node is not None and rowOff_node.text: rowOff = int(rowOff_node.text)
+
+                            rot = 0
+                            xfrm_node = next((c for c in anchor.iter() if c.tag.endswith('xfrm')), None)
+                            if xfrm_node is not None and 'rot' in xfrm_node.attrib:
+                                try: rot = int(xfrm_node.attrib['rot'])
+                                except: pass
+
+                            blip_node = next((c for c in anchor.iter() if c.tag.endswith('blip')), None)
+                            if blip_node is not None:
+                                embed_id = None
+                                for k, v in blip_node.attrib.items():
+                                    if k.endswith('embed'): embed_id = v
+
+                                if embed_id and embed_id in image_map and row >= 0:
+                                    actual_media = image_map[embed_id]
+                                    out_path = os.path.join(img_dir, f"img_{uuid.uuid4().hex}.png")
+                                    with open(out_path, "wb") as f:
+                                        f.write(archive.read(actual_media))
+                                    images_info.append({'row': row, 'col': col, 'rowOff': rowOff, 'path': out_path, 'rot': rot})
+                except Exception:
+                    pass
+    except Exception:
+        pass
     return images_info
 
 def lay_font_tieng_viet(font_name, size):
@@ -532,7 +537,6 @@ else:
             t_width = col_w.number_input("Chiều ngang PDF (cm):", value=10.0, step=0.1, key="tam_w")
             t_height = col_h.number_input("Chiều cao PDF (cm):", value=14.0, step=0.1, key="tam_h")
             
-            # CẬP NHẬT TÙY CHỌN: CHỐNG MẤT VIỀN
             kieu_xuat_tam_list = ["📄 1 thẻ giữa trang A4 (Chống mất viền)", "💳 1 thẻ chuẩn kích thước (Máy in PVC)"]
             kieu_xuat_tam = st.radio("Định dạng file PDF:", kieu_xuat_tam_list)
             
@@ -630,13 +634,13 @@ else:
 
                 pdf_buffer = io.BytesIO()
                 
-                # CẬP NHẬT: XUẤT FILE 1 THẺ CHỐNG MẤT VIỀN
                 if "giữa trang A4" in kieu_xuat_tam:
-                    doc = SimpleDocTemplate(pdf_buffer, pagesize=A4, leftMargin=0, rightMargin=0, topMargin=0, bottomMargin=0)
-                    img = RLImage(path_tam, width=t_width*cm, height=t_height*cm)
-                    table = Table([[img]], colWidths=[21*cm], rowHeights=[29.7*cm])
-                    table.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'CENTER'), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')]))
-                    doc.build([table])
+                    c = canvas.Canvas(pdf_buffer, pagesize=A4)
+                    a4_w, a4_h = A4
+                    card_w, card_h = t_width*cm, t_height*cm
+                    c.drawImage(path_tam, (a4_w - card_w)/2.0, (a4_h - card_h)/2.0, width=card_w, height=card_h)
+                    c.showPage()
+                    c.save()
                 else:
                     c = canvas.Canvas(pdf_buffer, pagesize=(t_width*cm, t_height*cm))
                     c.drawImage(path_tam, 0, 0, width=t_width*cm, height=t_height*cm)
@@ -664,7 +668,6 @@ else:
         the_width_cm = st.sidebar.number_input("Chiều ngang thẻ (cm):", value=float(cfg.get('the_width_cm', 10.0)), step=0.1)
         the_height_cm = st.sidebar.number_input("Chiều cao thẻ (cm):", value=float(cfg.get('the_height_cm', 14.0)), step=0.1)
         
-        # CẬP NHẬT TÙY CHỌN: CHỐNG MẤT VIỀN CĂN GIỮA
         kieu_xuat_list = ["🔲 4 thẻ / 1 trang A4", "📄 1 thẻ giữa trang A4 (Chống mất viền)", "💳 1 thẻ chuẩn kích thước (Máy in PVC)"]
         kieu_idx = 0
         if cfg.get('kieu_xuat_file') in kieu_xuat_list:
@@ -975,18 +978,19 @@ else:
                                 table.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'CENTER'), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')]))
                                 story.append(table)
                                 doc.build(story)
+                                
                             elif "giữa trang A4" in kieu_xuat_file:
                                 st.info(f"💡 Thẻ sẽ được đặt chính giữa trang A4 để in trên các máy in văn phòng mà không bị lẹm lề/mất viền.")
                                 for i, p in enumerate(danh_sach_duong_dan_the): st.image(p, caption=f"Thẻ số {i+1}", use_container_width=True)
                                 
-                                doc = SimpleDocTemplate(pdf_buffer, pagesize=A4, leftMargin=0, rightMargin=0, topMargin=0, bottomMargin=0)
-                                story = []
+                                c = canvas.Canvas(pdf_buffer, pagesize=A4)
+                                a4_w, a4_h = A4
+                                card_w, card_h = the_width_cm*cm, the_height_cm*cm
                                 for path_the in danh_sach_duong_dan_the:
-                                    img = RLImage(path_the, width=the_width_cm*cm, height=the_height_cm*cm)
-                                    table = Table([[img]], colWidths=[21*cm], rowHeights=[29.7*cm])
-                                    table.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'CENTER'), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')]))
-                                    story.append(table)
-                                doc.build(story)
+                                    c.drawImage(path_the, (a4_w - card_w)/2.0, (a4_h - card_h)/2.0, width=card_w, height=card_h)
+                                    c.showPage()
+                                c.save()
+                                
                             else:
                                 st.info(f"💡 Kích thước xuất PDF: {the_width_cm}cm x {the_height_cm}cm. Chuyên dùng cho máy in thẻ nhựa.")
                                 for i, p in enumerate(danh_sach_duong_dan_the): st.image(p, caption=f"Thẻ số {i+1}", use_container_width=True)
