@@ -106,9 +106,6 @@ def save_config(cfg):
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f: json.dump(cfg, f, ensure_ascii=False, indent=4)
     except Exception as e: pass
 
-# =========================================================
-# LÕI QUÉT OMNI-SCANNER: VÉT CẠN MỌI FILE ẢNH TRONG EXCEL
-# =========================================================
 def extract_images_from_excel(file_buffer, target_sheet_name):
     img_dir = os.path.join(OUTPUT_DIR, "extracted_images")
     os.makedirs(img_dir, exist_ok=True)
@@ -119,117 +116,119 @@ def extract_images_from_excel(file_buffer, target_sheet_name):
             namelist = archive.namelist()
             namelist_lower = {f.lower(): f for f in namelist}
 
-            def read_xml(path_guess):
-                actual_path = namelist_lower.get(path_guess.lower())
+            def read_xml(path):
+                actual_path = namelist_lower.get(path.lower())
                 if actual_path: return ET.fromstring(archive.read(actual_path))
                 return None
 
-            # 1. Cố gắng tìm Drawing XML chuẩn của Sheet hiện tại
-            target_drawing_path = None
-            try:
-                wb_root = read_xml('xl/workbook.xml')
-                sheet_rid = None
-                if wb_root is not None:
-                    for sheet in wb_root.iter():
-                        if sheet.tag.endswith('sheet') and sheet.attrib.get('name', '').strip() == target_sheet_name.strip():
-                            for k, v in sheet.attrib.items():
-                                if k.endswith('id'): sheet_rid = v
+            wb_root = read_xml('xl/workbook.xml')
+            sheet_rId = None
+            if wb_root is not None:
+                for sheet in wb_root.iter():
+                    if sheet.tag.endswith('sheet') and sheet.attrib.get('name', '').strip() == target_sheet_name.strip():
+                        for k, v in sheet.attrib.items():
+                            if k.endswith('id'): sheet_rId = v
+                        break
+
+            sheet_xml_path = None
+            if sheet_rId:
+                wb_rels_root = read_xml('xl/_rels/workbook.xml.rels')
+                if wb_rels_root is not None:
+                    for rel in wb_rels_root.iter():
+                        if rel.attrib.get('Id') == sheet_rId:
+                            sheet_xml_path = rel.attrib.get('Target')
                             break
 
-                if sheet_rid:
-                    rels_root = read_xml('xl/_rels/workbook.xml.rels')
-                    sheet_xml_target = None
-                    if rels_root is not None:
-                        for rel in rels_root.iter():
-                            if rel.attrib.get('Id') == sheet_rid:
-                                sheet_xml_target = rel.attrib.get('Target')
+            drawing_rId = None
+            if sheet_xml_path:
+                if sheet_xml_path.startswith('/xl/'): sheet_xml_path = sheet_xml_path[4:]
+                elif sheet_xml_path.startswith('xl/'): sheet_xml_path = sheet_xml_path[3:]
+                
+                sheet_root = read_xml(f'xl/{sheet_xml_path}')
+                if sheet_root is not None:
+                    for child in sheet_root.iter():
+                        if child.tag.endswith('drawing'):
+                            for k, v in child.attrib.items():
+                                if k.endswith('id'): drawing_rId = v
+                            break
+
+            target_drawing_xml = None
+            if drawing_rId and sheet_xml_path:
+                sheet_dir = os.path.dirname(sheet_xml_path)
+                sheet_basename = os.path.basename(sheet_xml_path)
+                sheet_rels_path = f"xl/{sheet_dir}/_rels/{sheet_basename}.rels".replace('//', '/')
+                
+                sheet_rels_root = read_xml(sheet_rels_path)
+                if sheet_rels_root is not None:
+                    for rel in sheet_rels_root.iter():
+                        if rel.attrib.get('Id') == drawing_rId:
+                            dw_target = rel.attrib.get('Target')
+                            if dw_target.startswith('../'): target_drawing_xml = f"xl/{dw_target[3:]}"
+                            else: target_drawing_xml = f"xl/{sheet_dir}/{dw_target}"
+                            break
+
+            drawings_to_scan = [target_drawing_xml] if target_drawing_xml else [f for f in namelist if '/drawings/drawing' in f.lower() and f.lower().endswith('.xml')]
+
+            for drawing_actual_path in drawings_to_scan:
+                if not drawing_actual_path: continue
+                drawing_root = read_xml(drawing_actual_path)
+                if drawing_root is None: continue
+                
+                drawing_dir = os.path.dirname(drawing_actual_path)
+                drawing_basename = os.path.basename(drawing_actual_path)
+                drawing_rels_path = f"{drawing_dir}/_rels/{drawing_basename}.rels".replace('//', '/')
+                
+                drawing_rels_root = read_xml(drawing_rels_path)
+                image_map = {} 
+                if drawing_rels_root is not None:
+                    for rel in drawing_rels_root.iter():
+                        if 'image' in str(rel.attrib.get('Type', '')).lower():
+                            rId = rel.attrib.get('Id')
+                            target = rel.attrib.get('Target') 
+                            if target.startswith('/'): image_map[rId] = target[1:]
+                            elif target.startswith('../'): image_map[rId] = f"xl/{target[3:]}"
+                            else: image_map[rId] = f"{drawing_dir}/{target}"
+
+                for anchor in drawing_root.iter():
+                    if anchor.tag.endswith('twoCellAnchor') or anchor.tag.endswith('oneCellAnchor') or anchor.tag.endswith('absoluteAnchor'):
+                        row, col, rowOff = -1, -1, 0
+                        from_node = None
+                        for child in anchor.iter():
+                            if child.tag.endswith('from'):
+                                from_node = child
                                 break
+                        if from_node is not None:
+                            for child in from_node.iter():
+                                if child.tag.endswith('row'): row = int(child.text)
+                                if child.tag.endswith('col'): col = int(child.text)
+                                if child.tag.endswith('rowOff'): rowOff = int(child.text)
 
-                    if sheet_xml_target:
-                        sheet_basename = os.path.basename(sheet_xml_target)
-                        sheet_dir = os.path.dirname(sheet_xml_target)
-                        if sheet_dir.startswith('/'): sheet_dir = sheet_dir[1:]
-                        if sheet_dir and not sheet_dir.startswith('xl/'): sheet_dir = f"xl/{sheet_dir}"
-                        elif not sheet_dir: sheet_dir = "xl/worksheets"
+                        rot = 0
+                        img_rId = None
+                        for elem in anchor.iter():
+                            if elem.tag.endswith('xfrm'):
+                                rot_str = elem.attrib.get('rot')
+                                if rot_str:
+                                    try: rot = int(rot_str)
+                                    except: pass
+                            if elem.tag.endswith('blip'):
+                                for k, v in elem.attrib.items():
+                                    if k.endswith('embed'): img_rId = v
 
-                        sheet_rels_path = f"{sheet_dir}/_rels/{sheet_basename}.rels".replace('//', '/')
-                        sheet_rels_root = read_xml(sheet_rels_path)
+                        if img_rId and img_rId in image_map and row >= 0:
+                            media_path = image_map[img_rId]
+                            actual_media_path = namelist_lower.get(media_path.lower())
+                            
+                            if not actual_media_path:
+                                img_basename = os.path.basename(media_path).lower()
+                                actual_media_path = next((f for f in namelist if os.path.basename(f).lower() == img_basename), None)
 
-                        if sheet_rels_root is not None:
-                            for rel in sheet_rels_root.iter():
-                                if 'drawing' in str(rel.attrib.get('Type', '')).lower():
-                                    dw_target = os.path.basename(rel.attrib.get('Target'))
-                                    target_drawing_path = next((f for f in namelist if f.lower().endswith(f'/drawings/{dw_target}'.lower())), None)
-                                    break
-            except Exception:
-                pass
-
-            # 2. XÁC ĐỊNH PHẠM VI QUÉT (Nếu tìm thấy chuẩn thì quét chuẩn, nếu đứt gãy thì QUÉT TOÀN BỘ)
-            if target_drawing_path:
-                drawings_to_scan = [target_drawing_path]
-            else:
-                drawings_to_scan = [f for f in namelist if '/drawings/drawing' in f.lower() and f.lower().endswith('.xml')]
-
-            # 3. TIẾN HÀNH BÓC TÁCH MÙ MỌI ĐƯỜNG DẪN
-            for draw_path in drawings_to_scan:
-                try:
-                    draw_dir = os.path.dirname(draw_path)
-                    draw_name = os.path.basename(draw_path)
-                    rels_guess = f"{draw_dir}/_rels/{draw_name}.rels"
-                    actual_rels_path = namelist_lower.get(rels_guess.lower())
-
-                    image_map = {}
-                    if actual_rels_path:
-                        rels_root = ET.fromstring(archive.read(actual_rels_path))
-                        for rel in rels_root.iter():
-                            if 'image' in str(rel.attrib.get('Type')).lower():
-                                rid = rel.attrib.get('Id')
-                                target = rel.attrib.get('Target')
-                                
-                                # TÍNH NĂNG VÉT CẠN: Bỏ qua đường dẫn ảo, chỉ lấy đúng Tên File Ảnh
-                                img_filename = os.path.basename(target)
-                                # Dùng tên file ảnh lục soát tung toàn bộ file Zip
-                                actual_media = next((f for f in namelist if os.path.basename(f).lower() == img_filename.lower()), None)
-                                if actual_media:
-                                    image_map[rid] = actual_media
-
-                    draw_root = ET.fromstring(archive.read(draw_path))
-                    for anchor in draw_root.iter():
-                        # Hỗ trợ cả 3 loại cấu trúc thả ảnh của Excel
-                        if anchor.tag.endswith('twoCellAnchor') or anchor.tag.endswith('oneCellAnchor') or anchor.tag.endswith('absoluteAnchor'):
-                            row, col, rowOff = -1, -1, 0
-                            from_node = next((c for c in anchor.iter() if c.tag.endswith('from')), None)
-                            if from_node is not None:
-                                row_node = next((c for c in from_node.iter() if c.tag.endswith('row')), None)
-                                col_node = next((c for c in from_node.iter() if c.tag.endswith('col')), None)
-                                rowOff_node = next((c for c in from_node.iter() if c.tag.endswith('rowOff')), None)
-
-                                if row_node is not None and row_node.text: row = int(row_node.text)
-                                if col_node is not None and col_node.text: col = int(col_node.text)
-                                if rowOff_node is not None and rowOff_node.text: rowOff = int(rowOff_node.text)
-
-                            rot = 0
-                            xfrm_node = next((c for c in anchor.iter() if c.tag.endswith('xfrm')), None)
-                            if xfrm_node is not None and 'rot' in xfrm_node.attrib:
-                                try: rot = int(xfrm_node.attrib['rot'])
-                                except: pass
-
-                            blip_node = next((c for c in anchor.iter() if c.tag.endswith('blip')), None)
-                            if blip_node is not None:
-                                embed_id = None
-                                for k, v in blip_node.attrib.items():
-                                    if k.endswith('embed'): embed_id = v
-
-                                if embed_id and embed_id in image_map and row >= 0:
-                                    actual_media = image_map[embed_id]
-                                    out_path = os.path.join(img_dir, f"img_{uuid.uuid4().hex}.png")
-                                    with open(out_path, "wb") as f:
-                                        f.write(archive.read(actual_media))
-                                    images_info.append({'row': row, 'col': col, 'rowOff': rowOff, 'path': out_path, 'rot': rot})
-                except Exception:
-                    pass
-    except Exception:
-        pass
+                            if actual_media_path:
+                                out_path = os.path.join(img_dir, f"img_{uuid.uuid4().hex}.png")
+                                with open(out_path, "wb") as f:
+                                    f.write(archive.read(actual_media_path))
+                                images_info.append({'row': row, 'col': col, 'rowOff': rowOff, 'path': out_path, 'rot': rot})
+    except Exception as e: pass
     return images_info
 
 def lay_font_tieng_viet(font_name, size):
@@ -777,7 +776,6 @@ else:
         
         if file_excel is not None:
             file_bytes = file_excel.getvalue()
-            don_dep_bo_nho_tam() 
             
             try:
                 xls = pd.ExcelFile(io.BytesIO(file_bytes), engine='openpyxl')
@@ -795,6 +793,10 @@ else:
             
             if st.session_state.get('current_file_id') != file_id:
                 st.session_state['current_file_id'] = file_id
+                
+                # CHỈ DỌN RÁC KHI UP FILE MỚI - BẢO VỆ ẢNH TUYỆT ĐỐI
+                don_dep_bo_nho_tam() 
+                
                 with st.spinner("⏳ Đang xử lý dữ liệu và bóc tách ảnh..."):
                     header_idx = int(header_row) - 1
                     try:
@@ -863,6 +865,8 @@ else:
                 for img in ban_do_anh:
                     dict_images[(img['row'], img['col'])] = img 
                 ban_do_anh = list(dict_images.values())
+                
+                ban_do_anh.sort(key=lambda x: (-x['col'], x['row']))
                 for img in ban_do_anh: img['used'] = False
             else: 
                 ban_do_anh = []
@@ -873,21 +877,23 @@ else:
                 current_excel_row = current_xml_row + 1
                 persons.append({'row_data': row, 'xml_row': current_xml_row, 'excel_row': current_excel_row, 'img_info': None})
 
-            for dist_allowed in [0, 1, 2]:
-                for p in persons:
-                    if p['img_info'] is None:
-                        candidates = []
-                        for img in ban_do_anh:
-                            if not img.get('used'):
-                                dist = abs(img['row'] - p['xml_row'])
-                                if dist == dist_allowed:
-                                    candidates.append((-img['col'], img))
+            for p in persons:
+                best_img = None
+                
+                for img in ban_do_anh:
+                    if not img.get('used') and abs(img['row'] - p['xml_row']) == 0:
+                        best_img = img
+                        break
                         
-                        if candidates:
-                            candidates.sort(key=lambda x: x[0])
-                            best_img = candidates[0][1]
-                            p['img_info'] = best_img
-                            best_img['used'] = True
+                if not best_img:
+                    for img in ban_do_anh:
+                        if not img.get('used') and abs(img['row'] - p['xml_row']) <= 2:
+                            best_img = img
+                            break
+
+                if best_img:
+                    p['img_info'] = best_img
+                    best_img['used'] = True
 
             nguoi_bi_ngang = []
             for p in persons:
